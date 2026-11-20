@@ -1,0 +1,8 @@
+{
+  "name": "Texas Lung & Specialty Care — Patient Appointment Portal",
+  "description": "Accessible patient appointment portal for booking, rescheduling, cancelling, and managing upcoming clinic visits with light and dark themes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
