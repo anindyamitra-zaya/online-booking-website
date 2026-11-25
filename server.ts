@@ -34,7 +34,52 @@ interface PhoneVerificationChallenge {
   verificationToken?: string;
 }
 
+interface PatientSession {
+  patientId?: string;
+  verifiedPhone?: string;
+  verifiedPhoneToken?: string;
+  lastActive: number;
+  bookingCount: number;
+  phoneSendCount: number;
+  ip: string;
+}
+
 const phoneChallenges = new Map<string, PhoneVerificationChallenge>();
+const sessions = new Map<string, PatientSession>();
+
+function validateSession(
+  req: express.Request,
+  res: express.Response
+): PatientSession | null {
+  const token = (
+    req.headers['x-session-token'] ||
+    req.body?.sessionToken ||
+    req.query?.sessionToken ||
+    ''
+  )
+    .toString()
+    .trim();
+
+  if (!token) {
+    res.status(401).json({
+      error: 'Active session required. Please verify your details again.',
+    });
+    return null;
+  }
+
+  const session = sessions.get(token);
+  if (!session || Date.now() - session.lastActive > 15 * 60 * 1000) {
+    sessions.delete(token);
+    res.status(401).json({
+      error:
+        'Your session has expired due to inactivity. Please verify your details again.',
+    });
+    return null;
+  }
+
+  session.lastActive = Date.now();
+  return session;
+}
 
 const RECAPTCHA_SITE_KEY = (
   process.env.VITE_RECAPTCHA_SITE_KEY ||
@@ -307,12 +352,29 @@ async function startServer() {
     res.json({ date, providerId, slots });
   });
 
-  app.post('/api/patients/lookup', (req, res) => {
+  app.post('/api/session/keep-alive', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+    res.json({ ok: true });
+  });
+
+  app.post('/api/patients/lookup', async (req, res) => {
     const fullName = String(req.body?.fullName || '').trim();
     const rawDob = String(req.body?.dateOfBirth || '').trim();
     const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
     const phone = String(req.body?.phone || '').trim();
     const email = String(req.body?.email || '').trim();
+    const recaptchaToken = String(req.body?.recaptchaToken || '').trim();
+
+    const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, req.ip);
+    if (!recaptchaCheck.ok) {
+      res.status(recaptchaToken ? 403 : 400).json({
+        error:
+          recaptchaCheck.error ||
+          'Please complete the reCAPTCHA verification before checking records.',
+      });
+      return;
+    }
 
     if (!fullName || !dateOfBirth) {
       res.status(400).json({
@@ -320,6 +382,14 @@ async function startServer() {
       });
       return;
     }
+
+    const sessionToken = crypto.randomBytes(24).toString('hex');
+    sessions.set(sessionToken, {
+      lastActive: Date.now(),
+      bookingCount: 0,
+      phoneSendCount: 0,
+      ip: req.ip || '',
+    });
 
     const existing = store.patients.find(
       (p) =>
@@ -331,10 +401,13 @@ async function startServer() {
       if (phone) existing.phone = phone;
       if (email) existing.email = email;
       saveStore(store);
+      const sess = sessions.get(sessionToken);
+      if (sess) sess.patientId = existing.id;
       res.json({
         found: true,
         status: 'established',
         patient: existing,
+        sessionToken,
       });
       return;
     }
@@ -342,12 +415,25 @@ async function startServer() {
     res.json({
       found: false,
       status: 'new',
+      sessionToken,
       message:
         'No existing patient record found. Please verify your phone number to continue registration.',
     });
   });
 
   app.post('/api/patients/phone-verification/send', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
+    if (session.phoneSendCount >= 5) {
+      res.status(429).json({
+        error:
+          'Too many verification code requests in this session. Please try again later.',
+      });
+      return;
+    }
+    session.phoneSendCount++;
+
     const rawPhone = String(req.body?.phone || '').trim();
     const phoneErr = validatePhoneNumber(rawPhone);
     if (phoneErr) {
@@ -375,6 +461,9 @@ async function startServer() {
   });
 
   app.post('/api/patients/phone-verification/verify', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
     const rawPhone = String(req.body?.phone || '').trim();
     const code = String(req.body?.code || '').trim();
     const phoneErr = validatePhoneNumber(rawPhone);
@@ -409,6 +498,9 @@ async function startServer() {
     challenge.verificationToken = verificationToken;
     phoneChallenges.set(phoneDigits, challenge);
 
+    session.verifiedPhone = rawPhone;
+    session.verifiedPhoneToken = verificationToken;
+
     res.json({
       verified: true,
       phone: challenge.phoneDisplay || rawPhone,
@@ -416,7 +508,10 @@ async function startServer() {
     });
   });
 
-  app.post('/api/patients/register', async (req, res) => {
+  app.post('/api/patients/register', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
     const fullName = String(req.body?.fullName || '').trim();
     const rawDob = String(req.body?.dateOfBirth || '').trim();
     const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
@@ -437,17 +532,6 @@ async function startServer() {
     const preferredLanguage = String(
       req.body?.preferredLanguage || 'English'
     ).trim();
-    const recaptchaToken = String(req.body?.recaptchaToken || '').trim();
-
-    const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, req.ip);
-    if (!recaptchaCheck.ok) {
-      res.status(recaptchaToken ? 403 : 400).json({
-        error:
-          recaptchaCheck.error ||
-          'Please complete the reCAPTCHA verification before registering.',
-      });
-      return;
-    }
 
     if (!fullName || !dateOfBirth || !phone) {
       res.status(400).json({
@@ -463,7 +547,8 @@ async function startServer() {
       !challenge ||
       !challenge.verified ||
       !phoneVerificationToken ||
-      challenge.verificationToken !== phoneVerificationToken
+      challenge.verificationToken !== phoneVerificationToken ||
+      session.verifiedPhoneToken !== phoneVerificationToken
     ) {
       res.status(403).json({
         error:
@@ -486,6 +571,7 @@ async function startServer() {
       if (pin) existing.pin = pin;
       phoneChallenges.delete(phoneDigits);
       saveStore(store);
+      session.patientId = existing.id;
       res.json(existing);
       return;
     }
@@ -509,10 +595,14 @@ async function startServer() {
     store.patients.push(newPatient);
     phoneChallenges.delete(phoneDigits);
     saveStore(store);
+    session.patientId = newPatient.id;
     res.status(201).json(newPatient);
   });
 
   app.get('/api/patients/:patientId', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
     const patient = store.patients.find((p) => p.id === req.params.patientId);
     if (!patient) {
       res.status(404).json({ error: 'Patient record not found.' });
@@ -523,6 +613,9 @@ async function startServer() {
 
   // Only returns upcoming active appointments for the verified patient & active clinic
   app.get('/api/appointments', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
     const patientId = String(req.query.patientId || '');
     if (!patientId) {
       res.status(400).json({ error: 'patientId is required.' });
@@ -542,7 +635,19 @@ async function startServer() {
     res.json(upcomingOnly);
   });
 
-  app.post('/api/appointments', async (req, res) => {
+  app.post('/api/appointments', (req, res) => {
+    const session = validateSession(req, res);
+    if (!session) return;
+
+    if (session.bookingCount >= 10) {
+      res.status(429).json({
+        error:
+          'Too many booking requests in this session. Please try again later.',
+      });
+      return;
+    }
+    session.bookingCount++;
+
     const bundle = resolveClinicBundle(
       (req.body?.clinicId as string | undefined) ||
         (req.query.clinic as string | undefined)
@@ -560,21 +665,9 @@ async function startServer() {
       patientEmail,
       reasonForVisit = '',
       accommodations = [],
-      recaptchaToken = '',
     } = req.body || {};
 
-    const recaptchaCheck = await verifyRecaptchaToken(
-      String(recaptchaToken || ''),
-      req.ip
-    );
-    if (!recaptchaCheck.ok) {
-      res.status(recaptchaToken ? 403 : 400).json({
-        error:
-          recaptchaCheck.error ||
-          'Please complete the reCAPTCHA verification before confirming.',
-      });
-      return;
-    }
+
 
     if (
       !patientId ||
@@ -761,6 +854,11 @@ async function startServer() {
       previousTime24: current.time24,
       date: newDate,
       time24: newTime24,
+      reasonForVisit:
+        req.body?.reasonForVisit !== undefined &&
+        String(req.body.reasonForVisit).trim()
+          ? String(req.body.reasonForVisit).trim()
+          : current.reasonForVisit,
       providerId: provider ? provider.id : current.providerId,
       providerName: provider ? provider.name : current.providerName,
       providerCredentials: provider

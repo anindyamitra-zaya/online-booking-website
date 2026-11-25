@@ -11,11 +11,9 @@ import { US_STATES } from '../data/usStates';
 import {
   formatDateLabel,
   validatePatientRegistration,
-  validateRecaptchaToken,
 } from '../utils/appointments';
 import { InsuranceCompanyCombobox } from './InsuranceCompanyCombobox';
 import { ThemedSelect } from './ThemedSelect';
-import { GoogleRecaptchaWidget } from './GoogleRecaptchaWidget';
 
 export interface VerifiedRegistrationSeed {
   fullName: string;
@@ -111,37 +109,31 @@ export function NewPatientRegistrationPage({
       insuranceProvider,
       insuranceMemberId,
     });
-    const captchaErr = validateRecaptchaToken(recaptchaToken);
-    if (Object.keys(validation).length > 0 || captchaErr) {
+    if (Object.keys(validation).length > 0) {
       setErrors(validation);
-      setRecaptchaError(captchaErr);
       return;
     }
 
     setErrors({});
-    setRecaptchaError('');
     setServerError('');
     setSubmitting(true);
     try {
-      const created = await registerPatient(
-        {
-          fullName: seed.fullName.trim(),
-          dateOfBirth: seed.dateOfBirth.trim(),
-          phone: seed.phone.trim(),
-          phoneVerificationToken: seed.phoneVerificationToken,
-          sex: sex.trim(),
-          preferredLanguage: preferredLanguage.trim(),
-          street: street.trim(),
-          city: city.trim(),
-          state: stateVal.trim(),
-          pin: pin.trim(),
-          insuranceProvider:
-            paymentType === 'insurance' ? insuranceProvider.trim() : 'Self-Pay',
-          memberId:
-            paymentType === 'insurance' ? insuranceMemberId.trim() : 'SELF-PAY',
-        },
-        recaptchaToken
-      );
+      const created = await registerPatient({
+        fullName: seed.fullName.trim(),
+        dateOfBirth: seed.dateOfBirth.trim(),
+        phone: seed.phone.trim(),
+        phoneVerificationToken: seed.phoneVerificationToken,
+        sex: sex.trim(),
+        preferredLanguage: preferredLanguage.trim(),
+        street: street.trim(),
+        city: city.trim(),
+        state: stateVal.trim(),
+        pin: pin.trim(),
+        insuranceProvider:
+          paymentType === 'insurance' ? insuranceProvider.trim() : 'Self-Pay',
+        memberId:
+          paymentType === 'insurance' ? insuranceMemberId.trim() : 'SELF-PAY',
+      });
       await onRegistered(created, 'new');
     } catch (err) {
       setServerError(
@@ -149,8 +141,6 @@ export function NewPatientRegistrationPage({
           ? err.message
           : 'Unable to complete patient registration. Please try again.'
       );
-      setRecaptchaToken('');
-      setRecaptchaResetSignal((prev) => prev + 1);
     } finally {
       setSubmitting(false);
     }
@@ -594,22 +584,7 @@ export function NewPatientRegistrationPage({
             </p>
           ) : null}
 
-          <div className="rounded-lg border border-slate-200 bg-white p-3.5 sm:p-4 dark:border-slate-800 dark:bg-slate-900">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Security Verification
-            </p>
-            <GoogleRecaptchaWidget
-              token={recaptchaToken}
-              onTokenChange={(nextToken) => {
-                setRecaptchaToken(nextToken);
-                if (nextToken && recaptchaError) {
-                  setRecaptchaError('');
-                }
-              }}
-              error={recaptchaError}
-              resetSignal={recaptchaResetSignal}
-            />
-          </div>
+
 
           <div
             data-testid="registration-footer"

@@ -13,6 +13,8 @@ import {
   fetchAppointments,
   fetchPatientById,
   rescheduleAppointment,
+  keepSessionAlive,
+  setSessionToken,
 } from './services/clinicApi';
 import type {
   Appointment,
@@ -33,6 +35,7 @@ import { CareTeamView } from './components/CareTeamView';
 import { ClinicInfoView } from './components/ClinicInfoView';
 import { RescheduleModal } from './components/RescheduleModal';
 import { CancelModal } from './components/CancelModal';
+import { SessionTimeoutModal } from './components/SessionTimeoutModal';
 
 function getInitialTheme(): 'light' | 'dark' {
   if (typeof document !== 'undefined') {
@@ -91,6 +94,56 @@ export default function App() {
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
 
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+
+  const showAnnouncement = useCallback((message: string) => {
+    setAnnouncement(message);
+  }, []);
+
+  useEffect(() => {
+    if (!announcement) return;
+    const timer = window.setTimeout(() => setAnnouncement(null), 6500);
+    return () => window.clearTimeout(timer);
+  }, [announcement]);
+
+  useEffect(() => {
+    if (!patient) return;
+    const handleActivity = () => {
+      setLastActivityTime(Date.now());
+    };
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('scroll', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+
+    const interval = window.setInterval(() => {
+      const elapsed = Date.now() - lastActivityTime;
+      if (elapsed >= 15 * 60 * 1000) {
+        setPatient(null);
+        setPatientKind(null);
+        setAppointments([]);
+        setSessionToken(null);
+        setShowTimeoutWarning(false);
+        try {
+          sessionStorage.removeItem(getSessionKey(clinic.id));
+        } catch {}
+        showAnnouncement('Your session expired due to inactivity.');
+      } else if (elapsed >= 13 * 60 * 1000) {
+        setShowTimeoutWarning(true);
+      }
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.clearInterval(interval);
+    };
+  }, [patient, lastActivityTime, clinic.id, showAnnouncement]);
 
   const upcomingCount = useMemo(
     () =>
@@ -109,15 +162,7 @@ export default function App() {
     });
   };
 
-  const showAnnouncement = useCallback((message: string) => {
-    setAnnouncement(message);
-  }, []);
 
-  useEffect(() => {
-    if (!announcement) return;
-    const timer = window.setTimeout(() => setAnnouncement(null), 6500);
-    return () => window.clearTimeout(timer);
-  }, [announcement]);
 
   // Keep document title & metadata synced with whichever clinic config is active
   useEffect(() => {
@@ -184,6 +229,7 @@ export default function App() {
     async (verified: PatientProfile, kind: 'established' | 'new') => {
       setPatient(verified);
       setPatientKind(kind);
+      setLastActivityTime(Date.now());
       try {
         sessionStorage.setItem(getSessionKey(clinic.id), verified.id);
       } catch {}
@@ -203,6 +249,8 @@ export default function App() {
     setPatient(null);
     setPatientKind(null);
     setAppointments([]);
+    setSessionToken(null);
+    setShowTimeoutWarning(false);
     try {
       sessionStorage.removeItem(getSessionKey(clinic.id));
     } catch {}
@@ -219,8 +267,7 @@ export default function App() {
   };
 
   const handleCreateAppointment = async (
-    draft: BookingDraft,
-    recaptchaToken: string
+    draft: BookingDraft
   ): Promise<Appointment> => {
     if (!patient) {
       throw new Error(
@@ -231,8 +278,7 @@ export default function App() {
     const created = await createAppointment(
       patient.id,
       clinic.id,
-      draft,
-      recaptchaToken
+      draft
     );
     const refreshed = await fetchAppointments(patient.id, clinic.id);
     setAppointments(refreshed);
@@ -250,6 +296,7 @@ export default function App() {
       providerId: string;
       locationId: string;
       visitMode: VisitMode;
+      reasonForVisit?: string;
     }
   ) => {
     const updated = await rescheduleAppointment(
@@ -439,6 +486,16 @@ export default function App() {
         cancellationReasons={clinic.cancellationReasons}
         onClose={() => setCancelTarget(null)}
         onConfirm={handleCancelConfirm}
+      />
+
+      <SessionTimeoutModal
+        open={showTimeoutWarning}
+        onStaySignedIn={async () => {
+          await keepSessionAlive();
+          setLastActivityTime(Date.now());
+          setShowTimeoutWarning(false);
+        }}
+        onSignOut={handleSignOutPatient}
       />
     </div>
   );

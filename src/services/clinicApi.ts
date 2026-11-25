@@ -13,15 +13,34 @@ import type {
   VisitMode,
 } from '../types/clinic';
 
-/**
- * Configurable API adapter layer.
- * Point VITE_CLINIC_API_BASE_URL to any compatible clinic API host, or leave blank
- * to use the built-in Express /api endpoints.
- */
 const API_BASE = (import.meta.env.VITE_CLINIC_API_BASE_URL || '').replace(
   /\/+$/,
   ''
 );
+
+let currentSessionToken: string | null = null;
+if (typeof window !== 'undefined') {
+  try {
+    currentSessionToken = sessionStorage.getItem('clinic-portal-session-token');
+  } catch {}
+}
+
+export function setSessionToken(token: string | null) {
+  currentSessionToken = token;
+  if (typeof window !== 'undefined') {
+    try {
+      if (token) {
+        sessionStorage.setItem('clinic-portal-session-token', token);
+      } else {
+        sessionStorage.removeItem('clinic-portal-session-token');
+      }
+    } catch {}
+  }
+}
+
+export function getSessionToken(): string | null {
+  return currentSessionToken;
+}
 
 export function getActiveClinicSlug(): string {
   if (typeof window !== 'undefined') {
@@ -60,25 +79,44 @@ export const API_ENDPOINTS = {
   insuranceCompanies: `${API_BASE}/api/insurance-companies`,
   recaptchaConfig: `${API_BASE}/api/security/recaptcha-config`,
   recaptchaChallenge: `${API_BASE}/api/security/recaptcha-challenge`,
+  sessionKeepAlive: `${API_BASE}/api/session/keep-alive`,
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string>) || {}),
+  };
+  const token = getSessionToken();
+  if (token) {
+    headers['X-Session-Token'] = token;
+  }
+
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
     ...init,
+    headers,
   });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) {
+      setSessionToken(null);
+    }
     throw new Error(
       (data as { error?: string }).error ||
         `Request failed (${response.status})`
     );
   }
   return data as T;
+}
+
+export async function keepSessionAlive(): Promise<void> {
+  try {
+    await requestJson(API_ENDPOINTS.sessionKeepAlive, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  } catch {}
 }
 
 export async function fetchClinicProfile(
@@ -117,7 +155,8 @@ export async function lookupPatient(payload: {
   dateOfBirth: string;
   phone?: string;
   email?: string;
-}): Promise<PatientLookupResult> {
+  recaptchaToken: string;
+}): Promise<PatientLookupResult & { sessionToken?: string }> {
   const response = await fetch(API_ENDPOINTS.patientLookup, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -135,14 +174,19 @@ export async function lookupPatient(payload: {
     );
   }
 
-  // Normalize either structured { found, status, patient } or direct PatientProfile
-  const raw = data as Partial<PatientLookupResult> & Partial<PatientProfile>;
+  const raw = data as Partial<PatientLookupResult> &
+    Partial<PatientProfile> & { sessionToken?: string };
+  if (raw.sessionToken) {
+    setSessionToken(raw.sessionToken);
+  }
+
   if (typeof raw.found === 'boolean') {
     return {
       found: raw.found,
       status: raw.status || (raw.found ? 'established' : 'new'),
       patient: raw.patient,
       message: raw.message,
+      sessionToken: raw.sessionToken,
     };
   }
   if (raw.id) {
@@ -150,9 +194,10 @@ export async function lookupPatient(payload: {
       found: true,
       status: 'established',
       patient: raw as PatientProfile,
+      sessionToken: raw.sessionToken,
     };
   }
-  return { found: false, status: 'new' };
+  return { found: false, status: 'new', sessionToken: raw.sessionToken };
 }
 
 export async function sendPhoneVerificationCode(payload: {
@@ -195,12 +240,11 @@ export async function registerPatient(
     insuranceProvider?: string;
     memberId?: string;
     preferredLanguage?: string;
-  },
-  recaptchaToken: string
+  }
 ): Promise<PatientProfile> {
   return requestJson<PatientProfile>(API_ENDPOINTS.patientRegister, {
     method: 'POST',
-    body: JSON.stringify({ ...payload, recaptchaToken }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -284,8 +328,7 @@ export async function createPreviewRecaptchaToken(): Promise<{
 export async function createAppointment(
   patientId: string,
   clinicId: string,
-  draft: BookingDraft,
-  recaptchaToken: string
+  draft: BookingDraft
 ): Promise<Appointment> {
   return requestJson<Appointment>(API_ENDPOINTS.appointments, {
     method: 'POST',
@@ -293,7 +336,6 @@ export async function createAppointment(
       patientId,
       clinicId,
       ...draft,
-      recaptchaToken,
     }),
   });
 }
@@ -307,6 +349,7 @@ export async function rescheduleAppointment(
     providerId?: string;
     locationId?: string;
     visitMode?: VisitMode;
+    reasonForVisit?: string;
   }
 ): Promise<Appointment> {
   return requestJson<Appointment>(

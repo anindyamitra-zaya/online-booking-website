@@ -22,6 +22,7 @@ import {
 } from '../utils/appointments';
 import type { VerifiedRegistrationSeed } from './NewPatientRegistrationPage';
 import { SegmentedDateInput } from './SegmentedDateInput';
+import { GoogleRecaptchaWidget } from './GoogleRecaptchaWidget';
 
 interface PatientEntryFormProps {
   idPrefix?: string;
@@ -73,9 +74,15 @@ export function PatientEntryForm({
     return () => window.clearInterval(timer);
   }, [stage, codeSent, resendCountdown]);
 
+  const [recaptchaToken, setRecaptchaToken] = useState('');
+  const [recaptchaResetSignal, setRecaptchaResetSignal] = useState(0);
+
   const handleLookupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const validation = validatePatientLookup(fullName, dateOfBirth);
+    if (!recaptchaToken) {
+      validation.recaptcha = 'Please complete the reCAPTCHA verification.';
+    }
     if (Object.keys(validation).length > 0) {
       setErrors(validation);
       return;
@@ -90,6 +97,7 @@ export function PatientEntryForm({
       const result = await lookupPatient({
         fullName: fullName.trim(),
         dateOfBirth: normalizedDob,
+        recaptchaToken,
       });
 
       if (result.found && result.patient) {
@@ -107,6 +115,8 @@ export function PatientEntryForm({
           ? err.message
           : 'Unable to check patient record. Please try again.'
       );
+      setRecaptchaResetSignal((prev) => prev + 1);
+      setRecaptchaToken('');
     } finally {
       setSubmitting(false);
     }
@@ -519,6 +529,20 @@ export function PatientEntryForm({
             </p>
           ) : null}
         </div>
+      </div>
+
+      <div>
+        <GoogleRecaptchaWidget
+          token={recaptchaToken}
+          onTokenChange={(t) => {
+            setRecaptchaToken(t);
+            if (errors.recaptcha) {
+              setErrors((prev) => ({ ...prev, recaptcha: '' }));
+            }
+          }}
+          error={errors.recaptcha}
+          resetSignal={recaptchaResetSignal}
+        />
       </div>
 
       {serverError ? (

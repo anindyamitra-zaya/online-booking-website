@@ -119,7 +119,7 @@ export function CancelModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="cancel-dialog-title"
-        className="w-full max-w-lg rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="w-full max-w-5xl min-h-[580px] sm:min-h-[640px] max-h-[92vh] flex flex-col justify-between overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5 dark:border-slate-800">
           <div className="flex items-start gap-3">
@@ -129,11 +129,11 @@ export function CancelModal({
             <div>
               <h2
                 id="cancel-dialog-title"
-                className="font-display text-lg font-semibold text-slate-900 dark:text-slate-50"
+                className="font-display text-lg sm:text-xl font-semibold text-slate-900 dark:text-slate-50"
               >
                 Cancel Appointment
               </h2>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
                 This will release your scheduled visit time back to the clinic.
               </p>
             </div>
@@ -149,7 +149,8 @@ export function CancelModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5" noValidate>
+        <form onSubmit={handleSubmit} className="flex flex-1 flex-col justify-between p-4 sm:p-6" noValidate>
+          <div className="space-y-4 sm:space-y-5">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
             <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
               {appointment.appointmentTypeName}
@@ -310,8 +311,9 @@ export function CancelModal({
               {errorMessage}
             </p>
           ) : null}
+          </div>
 
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800">
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800 mt-6">
             <button
               type="button"
               disabled={submitting}

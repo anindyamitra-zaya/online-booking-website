@@ -41,10 +41,8 @@ import {
   resolveProviderForBooking,
   toggleVisitReason,
   validateBookingStep,
-  validateRecaptchaToken,
 } from '../utils/appointments';
 import { REFERENCE_TODAY_ISO } from '../data/seedClinicData';
-import { GoogleRecaptchaWidget } from './GoogleRecaptchaWidget';
 
 interface BookingWizardProps {
   clinic: ClinicProfile;
@@ -54,8 +52,7 @@ interface BookingWizardProps {
   appointments: Appointment[];
   initialAppointmentTypeId?: string;
   onSubmitBooking: (
-    draft: BookingDraft,
-    recaptchaToken: string
+    draft: BookingDraft
   ) => Promise<Appointment>;
   onFinishToAppointments: () => void;
 }
@@ -162,23 +159,9 @@ export function BookingWizard({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [recaptchaToken, setRecaptchaToken] = useState('');
-  const [recaptchaError, setRecaptchaError] = useState('');
-  const [recaptchaResetSignal, setRecaptchaResetSignal] = useState(0);
   const [confirmedAppointment, setConfirmedAppointment] =
     useState<Appointment | null>(null);
   const didMountScrollRef = useRef(false);
-
-  useEffect(() => {
-    if (!didMountScrollRef.current) {
-      didMountScrollRef.current = true;
-      return;
-    }
-    const rafId = window.requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, behavior: 'auto' });
-    });
-    return () => window.cancelAnimationFrame(rafId);
-  }, [step, confirmedAppointment]);
 
   const eligibleProviders = providers.filter((p) =>
     draft.locationId ? p.locationIds.includes(draft.locationId) : true
@@ -195,6 +178,51 @@ export function BookingWizard({
     );
     return generated.length;
   };
+
+  const handleMonthNavigate = (newIdx: number) => {
+    if (newIdx < 0 || newIdx >= availableMonths.length) return;
+    setMonthIndex(newIdx);
+    const targetMonth = availableMonths[newIdx];
+    if (!targetMonth) return;
+    const cells = getCalendarMonthGrid(
+      targetMonth.year,
+      targetMonth.month,
+      minBookableIso,
+      maxBookableIso
+    );
+    // Automatically select the first date in the new month with open slots
+    const firstAvailableCell =
+      cells.find(
+        (c) =>
+          c.inCurrentMonth &&
+          c.inWindow &&
+          c.dateIso &&
+          getDateSlotCount(c.dateIso) > 0
+      ) || cells.find((c) => c.inCurrentMonth && c.inWindow && c.dateIso);
+
+    const targetDateIso = firstAvailableCell?.dateIso;
+    if (targetDateIso) {
+      setDraft((prev) => ({
+        ...prev,
+        date: targetDateIso,
+        time24: '',
+      }));
+      if (errors.date || errors.time24) {
+        setErrors((prev) => ({ ...prev, date: '', time24: '' }));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!didMountScrollRef.current) {
+      didMountScrollRef.current = true;
+      return;
+    }
+    const rafId = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [step, confirmedAppointment]);
 
   useEffect(() => {
     setDraft((prev) => ({
@@ -277,24 +305,20 @@ export function BookingWizard({
   const handleBack = () => {
     setErrors({});
     setSubmitError('');
-    setRecaptchaError('');
     setStep((prev) => Math.max(1, prev - 1));
   };
 
   const handleConfirmBooking = async () => {
     const allErrors = validateBookingStep(6, draft);
-    const captchaErr = validateRecaptchaToken(recaptchaToken);
-    if (Object.keys(allErrors).length > 0 || captchaErr) {
+    if (Object.keys(allErrors).length > 0) {
       setErrors(allErrors);
-      setRecaptchaError(captchaErr);
       return;
     }
 
     setSubmitting(true);
     setSubmitError('');
-    setRecaptchaError('');
     try {
-      const created = await onSubmitBooking(draft, recaptchaToken);
+      const created = await onSubmitBooking(draft);
       setConfirmedAppointment(created);
     } catch (err) {
       setSubmitError(
@@ -302,8 +326,6 @@ export function BookingWizard({
           ? err.message
           : 'Could not complete booking. Please check your time slot.'
       );
-      setRecaptchaToken('');
-      setRecaptchaResetSignal((prev) => prev + 1);
     } finally {
       setSubmitting(false);
     }
@@ -789,7 +811,7 @@ export function BookingWizard({
                   <button
                     type="button"
                     disabled={monthIndex === 0}
-                    onClick={() => setMonthIndex((prev) => Math.max(0, prev - 1))}
+                    onClick={() => handleMonthNavigate(monthIndex - 1)}
                     aria-label="Previous month"
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
@@ -798,11 +820,7 @@ export function BookingWizard({
                   <button
                     type="button"
                     disabled={monthIndex >= availableMonths.length - 1}
-                    onClick={() =>
-                      setMonthIndex((prev) =>
-                        Math.min(availableMonths.length - 1, prev + 1)
-                      )
-                    }
+                    onClick={() => handleMonthNavigate(monthIndex + 1)}
                     aria-label="Next month"
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
@@ -1201,22 +1219,7 @@ export function BookingWizard({
               ) : null}
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-3.5 sm:p-4 dark:border-slate-800 dark:bg-slate-900">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Security Verification
-              </p>
-              <GoogleRecaptchaWidget
-                token={recaptchaToken}
-                onTokenChange={(nextToken) => {
-                  setRecaptchaToken(nextToken);
-                  if (nextToken && recaptchaError) {
-                    setRecaptchaError('');
-                  }
-                }}
-                error={recaptchaError}
-                resetSignal={recaptchaResetSignal}
-              />
-            </div>
+
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
               You can reschedule or cancel this appointment online up to{' '}

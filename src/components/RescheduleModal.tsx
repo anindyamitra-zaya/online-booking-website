@@ -25,8 +25,11 @@ import {
   getAvailableMonths,
   getBookableDates,
   getCalendarMonthGrid,
+  getCommonVisitReasons,
   getReschedulePolicy,
+  isReasonSelected,
   resolveRescheduleTargets,
+  toggleVisitReason,
 } from '../utils/appointments';
 import { REFERENCE_TODAY_ISO } from '../data/seedClinicData';
 import { ThemedSelect } from './ThemedSelect';
@@ -45,6 +48,7 @@ interface RescheduleModalProps {
       providerId: string;
       locationId: string;
       visitMode: VisitMode;
+      reasonForVisit?: string;
     }
   ) => Promise<void>;
 }
@@ -71,6 +75,9 @@ export function RescheduleModal({
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const [selectedLocationId, setSelectedLocationId] = useState<string>(
     clinic.locations[0]?.id || ''
+  );
+  const [reasonForVisit, setReasonForVisit] = useState<string>(
+    appointment?.reasonForVisit || ''
   );
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -106,6 +113,34 @@ export function RescheduleModal({
     return generated.length;
   };
 
+  const handleMonthNavigate = (newIdx: number) => {
+    if (newIdx < 0 || newIdx >= availableMonths.length) return;
+    setMonthIndex(newIdx);
+    const targetMonth = availableMonths[newIdx];
+    if (!targetMonth) return;
+    const cells = getCalendarMonthGrid(
+      targetMonth.year,
+      targetMonth.month,
+      minBookableIso,
+      maxBookableIso
+    );
+    // Automatically select the first date in the new month with open slots
+    const firstAvailableCell =
+      cells.find(
+        (c) =>
+          c.inCurrentMonth &&
+          c.inWindow &&
+          c.dateIso &&
+          getDateSlotCount(c.dateIso) > 0
+      ) || cells.find((c) => c.inCurrentMonth && c.inWindow && c.dateIso);
+
+    const targetDateIso = firstAvailableCell?.dateIso;
+    if (targetDateIso) {
+      setSelectedDate(targetDateIso);
+      setSelectedTime24('');
+    }
+  };
+
   useEffect(() => {
     if (!appointment) return;
     const targetDate =
@@ -125,6 +160,7 @@ export function RescheduleModal({
         ? clinic.locations[0]?.id || ''
         : appointment.locationId
     );
+    setReasonForVisit(appointment.reasonForVisit || '');
     setErrorMessage('');
   }, [appointment, clinic.locations]);
 
@@ -191,6 +227,10 @@ export function RescheduleModal({
       );
       return;
     }
+    if (!reasonForVisit.trim()) {
+      setErrorMessage('Please provide a reason for your visit.');
+      return;
+    }
 
     setSubmitting(true);
     setErrorMessage('');
@@ -205,6 +245,7 @@ export function RescheduleModal({
         providerId: targets.providerId,
         locationId: targets.locationId,
         visitMode: 'in-person',
+        reasonForVisit: reasonForVisit.trim(),
       });
       onClose();
     } catch (err) {
@@ -229,7 +270,7 @@ export function RescheduleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="reschedule-dialog-title"
-        className="max-h-[90vh] sm:max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="w-full max-w-5xl min-h-[580px] sm:min-h-[640px] max-h-[92vh] flex flex-col justify-between overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
           <div>
@@ -375,7 +416,7 @@ export function RescheduleModal({
                   <button
                     type="button"
                     disabled={monthIndex === 0}
-                    onClick={() => setMonthIndex((prev) => Math.max(0, prev - 1))}
+                    onClick={() => handleMonthNavigate(monthIndex - 1)}
                     aria-label="Previous month"
                     className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
@@ -384,11 +425,7 @@ export function RescheduleModal({
                   <button
                     type="button"
                     disabled={monthIndex >= availableMonths.length - 1}
-                    onClick={() =>
-                      setMonthIndex((prev) =>
-                        Math.min(availableMonths.length - 1, prev + 1)
-                      )
-                    }
+                    onClick={() => handleMonthNavigate(monthIndex + 1)}
                     aria-label="Next month"
                     className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
@@ -547,6 +584,62 @@ export function RescheduleModal({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Reason for Visit */}
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="reschedule-reason"
+                className="block text-sm font-semibold text-slate-800 dark:text-slate-200"
+              >
+                Reason for Visit
+              </label>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Tap common reasons below or edit text
+              </span>
+            </div>
+            <textarea
+              id="reschedule-reason"
+              rows={2}
+              value={reasonForVisit}
+              onChange={(e) => {
+                setReasonForVisit(e.target.value);
+                if (errorMessage) setErrorMessage('');
+              }}
+              placeholder="Describe your symptoms or reason for visit..."
+              className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
+            {appointment.appointmentTypeId ? (
+              <div className="mt-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Common reasons (tap to add or remove)
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {getCommonVisitReasons(clinic, appointment.appointmentTypeId).map((r) => {
+                    const selected = isReasonSelected(reasonForVisit, r);
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setReasonForVisit((prev) => toggleVisitReason(prev, r));
+                          if (errorMessage) setErrorMessage('');
+                        }}
+                        className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {errorMessage ? (
