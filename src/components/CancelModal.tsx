@@ -253,10 +253,8 @@ export function CancelModal({
             ) : null}
           </div>
 
-          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            Clinic policy requests at least {cancellationPolicyHours} hours notice
-            for cancellations when possible. Need a different day instead? You can
-            close this dialog and choose Reschedule.
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Clinic policy requests {cancellationPolicyHours}h notice. Need to reschedule instead?
           </p>
 
           <div>
@@ -313,7 +311,7 @@ export function CancelModal({
             </p>
           ) : null}
 
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:justify-end sm:gap-3 dark:border-slate-800">
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800">
             <button
               type="button"
               disabled={submitting}

@@ -180,24 +180,27 @@ export async function verifyPhoneVerificationCode(payload: {
   );
 }
 
-export async function registerPatient(payload: {
-  fullName: string;
-  dateOfBirth: string;
-  phone: string;
-  phoneVerificationToken: string;
-  email?: string;
-  sex?: string;
-  street?: string;
-  city?: string;
-  state?: string;
-  pin?: string;
-  insuranceProvider?: string;
-  memberId?: string;
-  preferredLanguage?: string;
-}): Promise<PatientProfile> {
+export async function registerPatient(
+  payload: {
+    fullName: string;
+    dateOfBirth: string;
+    phone: string;
+    phoneVerificationToken: string;
+    email?: string;
+    sex?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    pin?: string;
+    insuranceProvider?: string;
+    memberId?: string;
+    preferredLanguage?: string;
+  },
+  recaptchaToken: string
+): Promise<PatientProfile> {
   return requestJson<PatientProfile>(API_ENDPOINTS.patientRegister, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, recaptchaToken }),
   });
 }
 

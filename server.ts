@@ -416,7 +416,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/patients/register', (req, res) => {
+  app.post('/api/patients/register', async (req, res) => {
     const fullName = String(req.body?.fullName || '').trim();
     const rawDob = String(req.body?.dateOfBirth || '').trim();
     const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
@@ -437,6 +437,17 @@ async function startServer() {
     const preferredLanguage = String(
       req.body?.preferredLanguage || 'English'
     ).trim();
+    const recaptchaToken = String(req.body?.recaptchaToken || '').trim();
+
+    const recaptchaCheck = await verifyRecaptchaToken(recaptchaToken, req.ip);
+    if (!recaptchaCheck.ok) {
+      res.status(recaptchaToken ? 403 : 400).json({
+        error:
+          recaptchaCheck.error ||
+          'Please complete the reCAPTCHA verification before registering.',
+      });
+      return;
+    }
 
     if (!fullName || !dateOfBirth || !phone) {
       res.status(400).json({

@@ -229,7 +229,7 @@ export function RescheduleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="reschedule-dialog-title"
-        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="max-h-[90vh] sm:max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
           <div>
@@ -558,7 +558,7 @@ export function RescheduleModal({
             </p>
           ) : null}
 
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:justify-end sm:gap-3 dark:border-slate-800">
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800">
             <button
               type="button"
               disabled={submitting}
