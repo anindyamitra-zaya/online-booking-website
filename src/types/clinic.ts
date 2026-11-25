@@ -102,6 +102,19 @@ export interface PatientLookupResult {
   message?: string;
 }
 
+export interface PhoneVerificationSendResult {
+  sent: boolean;
+  phone: string;
+  previewCode: string;
+  expiresInSeconds: number;
+}
+
+export interface PhoneVerificationVerifyResult {
+  verified: boolean;
+  phone: string;
+  verificationToken: string;
+}
+
 export interface TimeSlot {
   time24: string; // e.g. "09:30"
   label: string; // e.g. "9:30 AM"

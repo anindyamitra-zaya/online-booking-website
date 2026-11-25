@@ -164,12 +164,12 @@ export function ThemedSelect({
 
   const sizeClasses =
     size === 'sm'
-      ? 'px-3 py-2.5 text-sm min-h-[44px]'
+      ? 'px-3 py-2 text-sm h-[44px]'
       : 'px-2.5 py-1.5 text-xs min-h-[36px]';
 
   return (
     <div ref={containerRef} className="relative min-w-0 w-full">
-      <div className="relative mt-1 min-w-0">
+      <div className="relative mt-1.5 min-w-0">
         <button
           ref={triggerRef}
           id={id}
@@ -241,8 +241,8 @@ export function ThemedSelect({
                 aria-selected={isSelected}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  selectOption(opt);
                 }}
+                onClick={() => selectOption(opt)}
                 onMouseEnter={() => setActiveIndex(idx)}
                 className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
                   isSelected

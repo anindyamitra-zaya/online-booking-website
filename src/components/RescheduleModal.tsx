@@ -20,10 +20,11 @@ import type {
 import { fetchAvailability } from '../services/clinicApi';
 import {
   formatDateLabel,
-  formatShortDate,
   formatTime12h,
   generateAvailableSlots,
+  getAvailableMonths,
   getBookableDates,
+  getCalendarMonthGrid,
   getReschedulePolicy,
   resolveRescheduleTargets,
 } from '../utils/appointments';
@@ -48,6 +49,8 @@ interface RescheduleModalProps {
   ) => Promise<void>;
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
 export function RescheduleModal({
   appointment,
   clinic,
@@ -57,11 +60,13 @@ export function RescheduleModal({
   onConfirm,
 }: RescheduleModalProps) {
   const bookableDates = getBookableDates(REFERENCE_TODAY_ISO, 90);
-  const CHUNK_SIZE = 14;
-  const [dateChunkIndex, setDateChunkIndex] = useState(0);
-  const [selectedDate, setSelectedDate] = useState<string>(
-    bookableDates[0] || REFERENCE_TODAY_ISO
-  );
+  const minBookableIso = bookableDates[0] || REFERENCE_TODAY_ISO;
+  const maxBookableIso =
+    bookableDates[bookableDates.length - 1] || REFERENCE_TODAY_ISO;
+  const availableMonths = getAvailableMonths(REFERENCE_TODAY_ISO, 90);
+
+  const [monthIndex, setMonthIndex] = useState(0);
+  const [selectedDate, setSelectedDate] = useState<string>(minBookableIso);
   const [selectedTime24, setSelectedTime24] = useState<string>('');
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const [selectedLocationId, setSelectedLocationId] = useState<string>(
@@ -74,16 +79,24 @@ export function RescheduleModal({
 
   const { lockProvider, lockLocation } = getReschedulePolicy(clinic);
 
-  const currentChunkDates = bookableDates.slice(
-    dateChunkIndex * CHUNK_SIZE,
-    (dateChunkIndex + 1) * CHUNK_SIZE
+  const activeMonth = availableMonths[monthIndex] || {
+    year: 2026,
+    month: 11,
+    key: '2026-11',
+    label: 'November 2026',
+  };
+  const monthCells = getCalendarMonthGrid(
+    activeMonth.year,
+    activeMonth.month,
+    minBookableIso,
+    maxBookableIso
   );
 
   const getDateSlotCount = (dateIso: string) => {
     const activeProvId =
       lockProvider && appointment
         ? appointment.providerId
-        : selectedProviderId || 'any';
+        : selectedProviderId || appointment?.providerId || '';
     const generated = generateAvailableSlots(
       dateIso,
       activeProvId,
@@ -98,14 +111,13 @@ export function RescheduleModal({
     const targetDate =
       appointment.date >= REFERENCE_TODAY_ISO
         ? appointment.date
-        : bookableDates[0] || REFERENCE_TODAY_ISO;
+        : minBookableIso;
     setSelectedDate(targetDate);
-    const dateIdx = bookableDates.indexOf(targetDate);
-    if (dateIdx !== -1) {
-      setDateChunkIndex(Math.floor(dateIdx / CHUNK_SIZE));
-    } else {
-      setDateChunkIndex(0);
-    }
+    const targetMonthKey = targetDate.slice(0, 7);
+    const foundMonthIdx = availableMonths.findIndex(
+      (m) => m.key === targetMonthKey
+    );
+    setMonthIndex(foundMonthIdx >= 0 ? foundMonthIdx : 0);
     setSelectedTime24('');
     setSelectedProviderId(appointment.providerId);
     setSelectedLocationId(
@@ -164,13 +176,19 @@ export function RescheduleModal({
 
   if (!appointment) return null;
 
-  const morningSlots = slots.filter((s) => s.period === 'morning' && s.available);
-  const afternoonSlots = slots.filter((s) => s.period === 'afternoon' && s.available);
+  const morningSlots = slots.filter(
+    (s) => s.period === 'morning' && s.available
+  );
+  const afternoonSlots = slots.filter(
+    (s) => s.period === 'afternoon' && s.available
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDate || !selectedTime24) {
-      setErrorMessage('Please select both a new date and an available time slot.');
+      setErrorMessage(
+        'Please select both a new date and an available time slot.'
+      );
       return;
     }
 
@@ -211,17 +229,17 @@ export function RescheduleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="reschedule-dialog-title"
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
           <div>
             <h2
               id="reschedule-dialog-title"
-              className="font-display text-xl font-semibold text-slate-900 dark:text-slate-50"
+              className="font-display text-lg sm:text-xl font-semibold text-slate-900 dark:text-slate-50"
             >
               Reschedule Appointment
             </h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
               {appointment.appointmentTypeName}
             </p>
           </div>
@@ -235,27 +253,39 @@ export function RescheduleModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6 px-6 py-5">
+        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-3.5 sm:px-6 sm:py-4">
           {/* Current appointment summary */}
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Current Scheduled Time
             </p>
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-800 dark:text-slate-200">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-slate-800 dark:text-slate-200">
               <span className="inline-flex items-center gap-1.5 font-medium">
-                <Calendar className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <Calendar
+                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  aria-hidden="true"
+                />
                 <span>{formatDateLabel(appointment.date)}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
-                <Clock className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <Clock
+                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  aria-hidden="true"
+                />
                 <span>{formatTime12h(appointment.time24)}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
-                <User className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <User
+                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  aria-hidden="true"
+                />
                 <span>{appointment.providerName}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                <MapPin className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <MapPin
+                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  aria-hidden="true"
+                />
                 <span>{appointment.locationName}</span>
               </span>
             </div>
@@ -334,188 +364,228 @@ export function RescheduleModal({
             </div>
           </div>
 
-          {/* Date Picker */}
-          <div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Select Date (2-Week Schedule)
-              </span>
-              <div className="flex items-center gap-1.5">
-                <span className="mr-1 text-xs text-slate-500 dark:text-slate-400">
-                  {formatDateLabel(selectedDate)}
+          {/* 1-Month Calendar (Left) + Time Slots (Right) */}
+          <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
+            <div className="lg:col-span-7">
+              <div className="flex items-center justify-between gap-2 pb-2">
+                <span className="font-display text-sm font-semibold text-slate-900 dark:text-slate-50">
+                  {activeMonth.label}
                 </span>
-                <button
-                  type="button"
-                  disabled={dateChunkIndex === 0}
-                  onClick={() => setDateChunkIndex((prev) => Math.max(0, prev - 1))}
-                  aria-label="Previous 2 weeks"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  disabled={(dateChunkIndex + 1) * CHUNK_SIZE >= bookableDates.length}
-                  onClick={() => setDateChunkIndex((prev) => prev + 1)}
-                  aria-label="Next 2 weeks"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            <div className="mt-1.5 grid grid-cols-7 gap-1.5">
-              {currentChunkDates.map((dateIso) => {
-                const { weekday, monthDay } = formatShortDate(dateIso);
-                const isSelected = selectedDate === dateIso;
-                const count = getDateSlotCount(dateIso);
-                const isFullyBooked = count === 0;
-
-                return (
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
-                    key={dateIso}
                     type="button"
-                    disabled={isFullyBooked}
-                    onClick={() => {
-                      if (!isFullyBooked) {
-                        setSelectedDate(dateIso);
-                        setSelectedTime24('');
-                      }
-                    }}
-                    aria-pressed={isSelected}
-                    className={`relative flex flex-col items-center justify-center rounded-lg border px-1 py-1 text-center transition-colors min-h-[46px] ${
-                      isFullyBooked
-                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 opacity-60 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-600'
-                        : isSelected
-                          ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-teal-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-teal-400 dark:hover:bg-slate-900'
-                    }`}
+                    disabled={monthIndex === 0}
+                    onClick={() => setMonthIndex((prev) => Math.max(0, prev - 1))}
+                    aria-label="Previous month"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
-                    <span className="text-[10px] font-medium uppercase leading-none opacity-80">
-                      {weekday}
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={monthIndex >= availableMonths.length - 1}
+                    onClick={() =>
+                      setMonthIndex((prev) =>
+                        Math.min(availableMonths.length - 1, prev + 1)
+                      )
+                    }
+                    aria-label="Next month"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2 dark:border-slate-800 dark:bg-slate-950/40">
+                <div className="grid grid-cols-7 gap-1 pb-1 text-center">
+                  {WEEKDAYS.map((day) => (
+                    <span
+                      key={day}
+                      className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+                    >
+                      {day}
                     </span>
-                    <span className="mt-0.5 text-xs font-semibold tabular-nums leading-tight">
-                      {monthDay}
-                    </span>
-                    {count > 0 ? (
-                      <span
-                        className={`mt-0.5 rounded px-1.5 font-mono text-[9px] font-semibold tabular-nums leading-none ${
-                          isSelected
-                            ? 'bg-teal-900/30 text-white dark:bg-slate-950/30 dark:text-slate-950'
-                            : 'bg-teal-50 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300'
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {monthCells.map((cell, idx) => {
+                    if (!cell.inCurrentMonth || !cell.dateIso || !cell.dayNumber) {
+                      return (
+                        <div
+                          key={`empty-${idx}`}
+                          aria-hidden="true"
+                          className="min-h-[40px]"
+                        />
+                      );
+                    }
+                    const dateIso = cell.dateIso;
+                    const count = cell.inWindow ? getDateSlotCount(dateIso) : 0;
+                    const isDisabled = !cell.inWindow || count === 0;
+                    const isSelected = selectedDate === dateIso;
+
+                    return (
+                      <button
+                        key={dateIso}
+                        type="button"
+                        disabled={isDisabled}
+                        onClick={() => {
+                          if (!isDisabled) {
+                            setSelectedDate(dateIso);
+                            setSelectedTime24('');
+                          }
+                        }}
+                        aria-pressed={isSelected}
+                        className={`flex flex-col items-center justify-center rounded-lg border px-1 py-1 text-center transition-colors min-h-[40px] ${
+                          isDisabled
+                            ? 'cursor-not-allowed border-transparent bg-transparent text-slate-300 dark:text-slate-700'
+                            : isSelected
+                              ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
+                              : 'border-slate-200 bg-white text-slate-800 hover:border-teal-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-teal-400 dark:hover:bg-slate-900'
                         }`}
                       >
-                        {count}
-                      </span>
-                    ) : (
-                      <span className="mt-0.5 h-[13px]" aria-hidden="true" />
-                    )}
-                  </button>
-                );
-              })}
+                        <span className="text-xs font-semibold tabular-nums leading-none">
+                          {cell.dayNumber}
+                        </span>
+                        {!isDisabled ? (
+                          <span
+                            className={`mt-0.5 rounded px-1 font-mono text-[9px] font-semibold tabular-nums leading-none ${
+                              isSelected
+                                ? 'bg-teal-900/30 text-white dark:bg-slate-950/30 dark:text-slate-950'
+                                : 'bg-teal-50 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        ) : (
+                          <span className="mt-0.5 h-[10px]" aria-hidden="true" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Time Slots */}
-          <div aria-busy={loadingSlots}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
-                Select New Time
-              </span>
+            <div
+              aria-busy={loadingSlots}
+              className="lg:col-span-5 rounded-lg border border-slate-200 bg-slate-50/60 p-3.5 dark:border-slate-800 dark:bg-slate-950/40"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
+                <div>
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">
+                    Select New Time
+                  </span>
+                  <span className="mt-0.5 block font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                    {formatDateLabel(selectedDate)}
+                  </span>
+                </div>
+                {loadingSlots ? (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 dark:text-teal-300"
+                  >
+                    <Loader2
+                      className="h-3.5 w-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
+                    <span>Loading...</span>
+                  </span>
+                ) : null}
+              </div>
+
               {loadingSlots ? (
-                <span
-                  role="status"
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 dark:text-teal-300"
-                >
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  <span>Checking open times...</span>
-                </span>
-              ) : null}
-            </div>
-
-            {loadingSlots ? (
-              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, idx) => (
-                  <div
-                    key={idx}
-                    className="h-11 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800"
-                  />
-                ))}
-              </div>
-            ) : slots.length === 0 ? (
-              <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                No clinic hours on this date. Please choose another day.
-              </p>
-            ) : (
-              <div className="mt-3 space-y-4">
-                {[
-                  { heading: 'Morning', items: morningSlots },
-                  { heading: 'Afternoon', items: afternoonSlots },
-                ].map((group) =>
-                  group.items.length > 0 ? (
-                    <div key={group.heading}>
-                      <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        {group.heading}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        {group.items.map((slot) => {
-                          const isSelected = selectedTime24 === slot.time24;
-                          return (
-                            <button
-                              key={slot.time24}
-                              type="button"
-                              disabled={!slot.available}
-                              onClick={() => setSelectedTime24(slot.time24)}
-                              aria-pressed={isSelected}
-                              className={`rounded-lg border px-3 py-2.5 text-sm font-mono tabular-nums font-medium transition-colors min-h-[44px] ${
-                                !slot.available
-                                  ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-600'
-                                  : isSelected
-                                    ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
-                                    : 'border-slate-200 bg-white text-slate-800 hover:border-teal-600 hover:text-teal-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-teal-400 dark:hover:text-teal-300'
-                              }`}
-                            >
-                              {slot.label}
-                            </button>
-                          );
-                        })}
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="h-9 animate-pulse rounded-lg bg-slate-200/70 dark:bg-slate-800"
+                    />
+                  ))}
+                </div>
+              ) : slots.length === 0 ? (
+                <p className="mt-2.5 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                  No open clinic slots on this date. Please choose another day.
+                </p>
+              ) : (
+                <div className="mt-2.5 max-h-[268px] space-y-3 overflow-y-auto pr-1">
+                  {[
+                    { heading: 'Morning', items: morningSlots },
+                    { heading: 'Afternoon', items: afternoonSlots },
+                  ].map((group) =>
+                    group.items.length > 0 ? (
+                      <div key={group.heading}>
+                        <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          {group.heading}
+                        </p>
+                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                          {group.items.map((slot) => {
+                            const isSelected = selectedTime24 === slot.time24;
+                            return (
+                              <button
+                                key={slot.time24}
+                                type="button"
+                                disabled={!slot.available}
+                                onClick={() => setSelectedTime24(slot.time24)}
+                                aria-pressed={isSelected}
+                                className={`rounded-lg border px-2 py-2 text-xs font-mono tabular-nums font-medium transition-colors min-h-[38px] whitespace-nowrap ${
+                                  !slot.available
+                                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-600'
+                                    : isSelected
+                                      ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
+                                      : 'border-slate-200 bg-white text-slate-800 hover:border-teal-600 hover:text-teal-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-teal-400 dark:hover:text-teal-300'
+                                }`}
+                              >
+                                {slot.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ) : null
-                )}
-              </div>
-            )}
+                    ) : null
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {errorMessage ? (
             <p
               role="alert"
-              className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200"
+              className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200"
             >
               {errorMessage}
             </p>
           ) : null}
 
-          <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end dark:border-slate-800">
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:justify-end sm:gap-3 dark:border-slate-800">
             <button
               type="button"
               disabled={submitting}
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[44px]"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs sm:px-4 sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[40px]"
             >
-              Keep Current Time
+              <span className="sm:hidden">Keep Time</span>
+              <span className="hidden sm:inline">Keep Current Time</span>
             </button>
             <button
               type="submit"
               disabled={submitting || loadingSlots || !selectedTime24}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
               ) : null}
               <span>
-                {submitting ? 'Updating Visit...' : 'Confirm Reschedule'}
+                {submitting ? (
+                  'Updating...'
+                ) : (
+                  <>
+                    <span className="sm:hidden">Reschedule</span>
+                    <span className="hidden sm:inline">Confirm Reschedule</span>
+                  </>
+                )}
               </span>
             </button>
           </div>

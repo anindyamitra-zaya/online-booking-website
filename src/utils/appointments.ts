@@ -34,10 +34,10 @@ export function formatDateLabel(isoDate: string): string {
     return trimmed;
   }
   const [year, month, day] = parts;
-  return `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+  return `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}-${year}`;
 }
 
-export function formatDateInputDdMmYyyy(raw: string): string {
+export function formatDateInputMmDdYyyy(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 8);
   if (digits.length <= 2) {
     return digits;
@@ -48,7 +48,7 @@ export function formatDateInputDdMmYyyy(raw: string): string {
   return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
 }
 
-export function parseDdMmYyyyToIso(input: string): string | null {
+export function parseMmDdYyyyToIso(input: string): string | null {
   const trimmed = (input || '').trim();
   let year: number;
   let month: number;
@@ -57,7 +57,7 @@ export function parseDdMmYyyyToIso(input: string): string | null {
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     [year, month, day] = trimmed.split('-').map(Number);
   } else if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) {
-    [day, month, year] = trimmed.split('-').map(Number);
+    [month, day, year] = trimmed.split('-').map(Number);
   } else {
     return null;
   }
@@ -93,7 +93,7 @@ export function formatShortDate(isoDate: string): {
       weekday: 'short',
       timeZone: 'UTC',
     }).format(dt),
-    monthDay: `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}`,
+    monthDay: `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
   };
 }
 
@@ -190,6 +190,109 @@ export function getBookableDates(startDateIso: string, daysCount = 14): string[]
   return dates;
 }
 
+export interface CalendarMonthOption {
+  year: number;
+  month: number; // 1-12
+  key: string; // YYYY-MM
+  label: string; // e.g. November 2026
+}
+
+export interface CalendarDayCell {
+  dateIso: string | null;
+  dayNumber: number | null;
+  inCurrentMonth: boolean;
+  isSunday: boolean;
+  inWindow: boolean;
+}
+
+export function formatCalendarMonthTitle(year: number, month: number): string {
+  const dt = new Date(Date.UTC(year, month - 1, 1, 12, 0, 0));
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(dt);
+}
+
+export function getAvailableMonths(
+  startDateIso: string,
+  daysCount = 90
+): CalendarMonthOption[] {
+  const bookable = getBookableDates(startDateIso, daysCount);
+  const seen = new Set<string>();
+  const months: CalendarMonthOption[] = [];
+
+  for (const iso of bookable) {
+    const [year, month] = iso.split('-').map(Number);
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      months.push({
+        year,
+        month,
+        key,
+        label: formatCalendarMonthTitle(year, month),
+      });
+    }
+  }
+  return months;
+}
+
+export function getCalendarMonthGrid(
+  year: number,
+  month: number,
+  minIso: string,
+  maxIso: string
+): CalendarDayCell[] {
+  const firstDayDt = new Date(Date.UTC(year, month - 1, 1, 12, 0, 0));
+  const startWeekday = firstDayDt.getUTCDay(); // 0 (Sun) - 6 (Sat)
+  const daysInMonth = new Date(Date.UTC(year, month, 0, 12, 0, 0)).getUTCDate();
+
+  const cells: CalendarDayCell[] = [];
+
+  for (let i = 0; i < startWeekday; i += 1) {
+    cells.push({
+      dateIso: null,
+      dayNumber: null,
+      inCurrentMonth: false,
+      isSunday: i === 0,
+      inWindow: false,
+    });
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dt = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    const weekday = dt.getUTCDay();
+    const isSunday = weekday === 0;
+    const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const inWindow = !isSunday && dateIso >= minIso && dateIso <= maxIso;
+
+    cells.push({
+      dateIso,
+      dayNumber: day,
+      inCurrentMonth: true,
+      isSunday,
+      inWindow,
+    });
+  }
+
+  const remainder = cells.length % 7;
+  if (remainder !== 0) {
+    const trailing = 7 - remainder;
+    for (let i = 0; i < trailing; i += 1) {
+      cells.push({
+        dateIso: null,
+        dayNumber: null,
+        inCurrentMonth: false,
+        isSunday: false,
+        inWindow: false,
+      });
+    }
+  }
+
+  return cells;
+}
+
 const CLINIC_BASE_TIMES_WEEKDAY = [
   '08:30',
   '09:00',
@@ -273,17 +376,47 @@ export function validateBookingStep(
   const errors: ValidationErrors = {};
 
   if (step === 1) {
-    if (!draft.appointmentTypeId) {
-      errors.appointmentTypeId = 'Please select a visit type to continue.';
-    }
     if (draft.visitMode === 'in-person' && !draft.locationId) {
       errors.locationId = 'Please choose a clinic location.';
     }
   }
 
   if (step === 2) {
-    if (!draft.providerId) {
-      errors.providerId = 'Please choose a specialist or First Available.';
+    if (!draft.appointmentTypeId) {
+      errors.appointmentTypeId = 'Please select a visit type to continue.';
+    }
+  }
+
+  if (step === 3) {
+    if (!draft.providerId || draft.providerId === 'any') {
+      errors.providerId = 'Please choose a specialist.';
+    }
+  }
+
+  if (step === 4) {
+    if (!draft.date) {
+      errors.date = 'Please select an appointment date.';
+    }
+    if (!draft.time24) {
+      errors.time24 = 'Please select an available time slot.';
+    }
+  }
+
+  if (step === 5) {
+    if (!draft.reasonForVisit.trim()) {
+      errors.reasonForVisit = 'Please enter a reason for your visit.';
+    }
+  }
+
+  if (step === 6) {
+    if (draft.visitMode === 'in-person' && !draft.locationId) {
+      errors.locationId = 'Please choose a clinic location.';
+    }
+    if (!draft.appointmentTypeId) {
+      errors.appointmentTypeId = 'Please select a visit type to continue.';
+    }
+    if (!draft.providerId || draft.providerId === 'any') {
+      errors.providerId = 'Please choose a specialist.';
     }
     if (!draft.date) {
       errors.date = 'Please select an appointment date.';
@@ -299,15 +432,56 @@ export function validateBookingStep(
   return errors;
 }
 
+export function normalizePhoneDigits(phone: string): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return digits.slice(1);
+  }
+  return digits;
+}
+
+export function validatePhoneNumber(phone: string): string | null {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 10) {
+    return 'Please enter a valid 10-digit mobile phone number.';
+  }
+  return null;
+}
+
+export function validateVerificationCode(code: string): string | null {
+  const cleaned = (code || '').trim();
+  if (!/^\d{6}$/.test(cleaned)) {
+    return 'Please enter the 6-digit verification code.';
+  }
+  return null;
+}
+
+export function formatResendLabel(
+  secondsRemaining: number,
+  sending: boolean
+): string {
+  if (sending) {
+    return 'Sending...';
+  }
+  if (secondsRemaining > 0) {
+    return `Resend code (${secondsRemaining}s)`;
+  }
+  return 'Resend code';
+}
+
 export function validateCancellationReason(
   selectedReason: string,
-  customNote: string
+  customNote: string,
+  confirmed = true
 ): ValidationErrors {
   const errors: ValidationErrors = {};
   if (!selectedReason.trim()) {
     errors.reason = 'Please select a reason for cancelling.';
   } else if (selectedReason === 'Other reason' && !customNote.trim()) {
     errors.customNote = 'Please describe your reason for cancelling.';
+  }
+  if (!confirmed) {
+    errors.confirmed = 'Please confirm that you want to cancel this appointment.';
   }
   return errors;
 }
@@ -320,8 +494,8 @@ export function validatePatientLookup(
   if (fullName.trim().length < 2) {
     errors.fullName = 'Please enter your full name.';
   }
-  if (!parseDdMmYyyyToIso(dateOfBirth)) {
-    errors.dateOfBirth = 'Please enter a valid date of birth (DD-MM-YYYY).';
+  if (!parseMmDdYyyyToIso(dateOfBirth)) {
+    errors.dateOfBirth = 'Please enter a valid date of birth (MM-DD-YYYY).';
   }
   return errors;
 }
@@ -426,6 +600,7 @@ export function validatePatientRegistration(payload: {
   email?: string;
   age?: string;
   sex?: string;
+  preferredLanguage?: string;
   street?: string;
   city?: string;
   state?: string;
@@ -445,6 +620,9 @@ export function validatePatientRegistration(payload: {
   }
   if (!payload.sex?.trim()) {
     errors.sex = 'Please select sex.';
+  }
+  if (!payload.preferredLanguage?.trim()) {
+    errors.preferredLanguage = 'Please select a preferred language.';
   }
   if (
     !payload.street?.trim() ||
@@ -564,4 +742,11 @@ export function generateIcsContent(
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');
+}
+
+export function validateRecaptchaToken(token?: string | null): string {
+  if (!token || !token.trim()) {
+    return 'Please complete the Google reCAPTCHA check before confirming your appointment.';
+  }
+  return '';
 }

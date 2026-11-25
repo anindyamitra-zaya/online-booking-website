@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -17,8 +18,132 @@ import {
   filterInsuranceCompanies,
   filterUpcomingAppointments,
   generateAvailableSlots,
+  normalizePhoneDigits,
+  parseMmDdYyyyToIso,
   resolveProviderForBooking,
+  validatePhoneNumber,
+  validateVerificationCode,
 } from './src/utils/appointments';
+
+interface PhoneVerificationChallenge {
+  phoneDigits: string;
+  phoneDisplay: string;
+  code: string;
+  expiresAt: number;
+  verified: boolean;
+  verificationToken?: string;
+}
+
+const phoneChallenges = new Map<string, PhoneVerificationChallenge>();
+
+const RECAPTCHA_SITE_KEY = (
+  process.env.VITE_RECAPTCHA_SITE_KEY ||
+  process.env.RECAPTCHA_SITE_KEY ||
+  ''
+).trim();
+const RECAPTCHA_SECRET_KEY = (process.env.RECAPTCHA_SECRET_KEY || '').trim();
+const HAS_GOOGLE_RECAPTCHA = Boolean(RECAPTCHA_SITE_KEY && RECAPTCHA_SECRET_KEY);
+const PREVIEW_RECAPTCHA_SECRET = crypto.randomBytes(32);
+const usedPreviewNonces = new Map<string, number>();
+
+function issuePreviewRecaptchaToken(): { token: string; expiresInSeconds: number } {
+  const expiresInSeconds = 600;
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const exp = Date.now() + expiresInSeconds * 1000;
+  const payload = `${nonce}.${exp}`;
+  const sig = crypto
+    .createHmac('sha256', PREVIEW_RECAPTCHA_SECRET)
+    .update(payload)
+    .digest('hex');
+  return { token: `${payload}.${sig}`, expiresInSeconds };
+}
+
+function verifyPreviewRecaptchaToken(token: string): { ok: boolean; error?: string } {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return { ok: false, error: 'Invalid verification token. Please verify again.' };
+  }
+  const [nonce, expRaw, sigHex] = parts;
+  const exp = Number(expRaw);
+  if (!nonce || !Number.isFinite(exp) || Date.now() > exp) {
+    return { ok: false, error: 'Verification expired. Please check the box again.' };
+  }
+
+  const now = Date.now();
+  for (const [k, v] of usedPreviewNonces.entries()) {
+    if (v < now) usedPreviewNonces.delete(k);
+  }
+  if (usedPreviewNonces.has(nonce)) {
+    return { ok: false, error: 'Verification token already used. Please check the box again.' };
+  }
+
+  const expectedHex = crypto
+    .createHmac('sha256', PREVIEW_RECAPTCHA_SECRET)
+    .update(`${nonce}.${expRaw}`)
+    .digest('hex');
+  const sigBuf = Buffer.from(sigHex, 'hex');
+  const expectedBuf = Buffer.from(expectedHex, 'hex');
+  if (
+    sigBuf.length !== expectedBuf.length ||
+    !crypto.timingSafeEqual(sigBuf, expectedBuf)
+  ) {
+    return { ok: false, error: 'Invalid verification signature. Please verify again.' };
+  }
+
+  usedPreviewNonces.set(nonce, exp);
+  return { ok: true };
+}
+
+async function verifyRecaptchaToken(
+  token: string,
+  remoteIp?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const clean = token.trim();
+  if (!clean) {
+    return {
+      ok: false,
+      error: 'Please complete the reCAPTCHA check before confirming your appointment.',
+    };
+  }
+
+  if (!HAS_GOOGLE_RECAPTCHA) {
+    return verifyPreviewRecaptchaToken(clean);
+  }
+
+  try {
+    const params = new URLSearchParams({
+      secret: RECAPTCHA_SECRET_KEY,
+      response: clean,
+    });
+    if (remoteIp) {
+      params.set('remoteip', remoteIp);
+    }
+    const resp = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: 'Unable to verify Google reCAPTCHA right now. Please try again.',
+      };
+    }
+    const data = (await resp.json()) as { success?: boolean };
+    if (!data.success) {
+      return {
+        ok: false,
+        error: 'Google reCAPTCHA verification failed. Please complete the check again.',
+      };
+    }
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: 'Unable to reach Google reCAPTCHA verification service. Please try again.',
+    };
+  }
+}
 
 interface StoreState {
   patients: PatientProfile[];
@@ -111,6 +236,23 @@ async function startServer() {
     res.json({ status: 'ok', clinicId: bundle.clinic.id });
   });
 
+  app.get('/api/security/recaptcha-config', (_req, res) => {
+    res.json({
+      mode: HAS_GOOGLE_RECAPTCHA ? 'google' : 'preview',
+      siteKey: HAS_GOOGLE_RECAPTCHA ? RECAPTCHA_SITE_KEY : null,
+    });
+  });
+
+  app.post('/api/security/recaptcha-challenge', (_req, res) => {
+    if (HAS_GOOGLE_RECAPTCHA) {
+      res.status(400).json({
+        error: 'Live Google reCAPTCHA is enabled; use the Google reCAPTCHA widget.',
+      });
+      return;
+    }
+    res.json(issuePreviewRecaptchaToken());
+  });
+
   app.get('/api/clinics', (_req, res) => {
     res.json(listConfiguredClinics());
   });
@@ -167,7 +309,8 @@ async function startServer() {
 
   app.post('/api/patients/lookup', (req, res) => {
     const fullName = String(req.body?.fullName || '').trim();
-    const dateOfBirth = String(req.body?.dateOfBirth || '').trim();
+    const rawDob = String(req.body?.dateOfBirth || '').trim();
+    const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
     const phone = String(req.body?.phone || '').trim();
     const email = String(req.body?.email || '').trim();
 
@@ -200,14 +343,87 @@ async function startServer() {
       found: false,
       status: 'new',
       message:
-        'No existing patient record found. Please complete new patient registration.',
+        'No existing patient record found. Please verify your phone number to continue registration.',
+    });
+  });
+
+  app.post('/api/patients/phone-verification/send', (req, res) => {
+    const rawPhone = String(req.body?.phone || '').trim();
+    const phoneErr = validatePhoneNumber(rawPhone);
+    if (phoneErr) {
+      res.status(400).json({ error: phoneErr });
+      return;
+    }
+
+    const phoneDigits = normalizePhoneDigits(rawPhone);
+    const code = String(crypto.randomInt(100000, 1000000));
+    const expiresInSeconds = 300;
+    phoneChallenges.set(phoneDigits, {
+      phoneDigits,
+      phoneDisplay: rawPhone,
+      code,
+      expiresAt: Date.now() + expiresInSeconds * 1000,
+      verified: false,
+    });
+
+    res.json({
+      sent: true,
+      phone: rawPhone,
+      previewCode: code,
+      expiresInSeconds,
+    });
+  });
+
+  app.post('/api/patients/phone-verification/verify', (req, res) => {
+    const rawPhone = String(req.body?.phone || '').trim();
+    const code = String(req.body?.code || '').trim();
+    const phoneErr = validatePhoneNumber(rawPhone);
+    if (phoneErr) {
+      res.status(400).json({ error: phoneErr });
+      return;
+    }
+    const codeErr = validateVerificationCode(code);
+    if (codeErr) {
+      res.status(400).json({ error: codeErr });
+      return;
+    }
+
+    const phoneDigits = normalizePhoneDigits(rawPhone);
+    const challenge = phoneChallenges.get(phoneDigits);
+    if (!challenge || challenge.expiresAt < Date.now()) {
+      res.status(400).json({
+        error: 'Verification code expired. Please request a new code.',
+      });
+      return;
+    }
+
+    if (challenge.code !== code) {
+      res.status(400).json({
+        error: 'Invalid verification code. Please check the code and try again.',
+      });
+      return;
+    }
+
+    const verificationToken = crypto.randomBytes(24).toString('hex');
+    challenge.verified = true;
+    challenge.verificationToken = verificationToken;
+    phoneChallenges.set(phoneDigits, challenge);
+
+    res.json({
+      verified: true,
+      phone: challenge.phoneDisplay || rawPhone,
+      verificationToken,
     });
   });
 
   app.post('/api/patients/register', (req, res) => {
     const fullName = String(req.body?.fullName || '').trim();
-    const dateOfBirth = String(req.body?.dateOfBirth || '').trim();
+    const rawDob = String(req.body?.dateOfBirth || '').trim();
+    const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
     const phone = String(req.body?.phone || '').trim();
+    const phoneVerificationToken = String(
+      req.body?.phoneVerificationToken || ''
+    ).trim();
     const email = String(req.body?.email || '').trim();
     const sex = String(req.body?.sex || '').trim();
     const street = String(req.body?.street || '').trim();
@@ -230,6 +446,21 @@ async function startServer() {
       return;
     }
 
+    const phoneDigits = normalizePhoneDigits(phone);
+    const challenge = phoneChallenges.get(phoneDigits);
+    if (
+      !challenge ||
+      !challenge.verified ||
+      !phoneVerificationToken ||
+      challenge.verificationToken !== phoneVerificationToken
+    ) {
+      res.status(403).json({
+        error:
+          'Please verify your mobile phone number before completing patient registration.',
+      });
+      return;
+    }
+
     const existing = store.patients.find(
       (p) =>
         p.fullName.toLowerCase() === fullName.toLowerCase() &&
@@ -237,10 +468,12 @@ async function startServer() {
     );
     if (existing) {
       if (sex) existing.sex = sex;
+      if (preferredLanguage) existing.preferredLanguage = preferredLanguage;
       if (street) existing.street = street;
       if (city) existing.city = city;
       if (state) existing.state = state;
       if (pin) existing.pin = pin;
+      phoneChallenges.delete(phoneDigits);
       saveStore(store);
       res.json(existing);
       return;
@@ -263,6 +496,7 @@ async function startServer() {
       defaultAccommodations: [],
     };
     store.patients.push(newPatient);
+    phoneChallenges.delete(phoneDigits);
     saveStore(store);
     res.status(201).json(newPatient);
   });
@@ -297,7 +531,7 @@ async function startServer() {
     res.json(upcomingOnly);
   });
 
-  app.post('/api/appointments', (req, res) => {
+  app.post('/api/appointments', async (req, res) => {
     const bundle = resolveClinicBundle(
       (req.body?.clinicId as string | undefined) ||
         (req.query.clinic as string | undefined)
@@ -315,7 +549,21 @@ async function startServer() {
       patientEmail,
       reasonForVisit = '',
       accommodations = [],
+      recaptchaToken = '',
     } = req.body || {};
+
+    const recaptchaCheck = await verifyRecaptchaToken(
+      String(recaptchaToken || ''),
+      req.ip
+    );
+    if (!recaptchaCheck.ok) {
+      res.status(recaptchaToken ? 403 : 400).json({
+        error:
+          recaptchaCheck.error ||
+          'Please complete the reCAPTCHA verification before confirming.',
+      });
+      return;
+    }
 
     if (
       !patientId ||

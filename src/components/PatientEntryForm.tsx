@@ -1,20 +1,27 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, UserCheck, UserPlus } from 'lucide-react';
+import {
+  ArrowLeft,
+  Loader2,
+  Phone,
+  ShieldCheck,
+  UserCheck,
+} from 'lucide-react';
 import type { ClinicSamplePatient, PatientProfile } from '../types/clinic';
 import {
-  fetchInsuranceCompanies,
   lookupPatient,
-  registerPatient,
+  sendPhoneVerificationCode,
+  verifyPhoneVerificationCode,
 } from '../services/clinicApi';
-import { DEFAULT_INSURANCE_COMPANIES } from '../data/insuranceCompanies';
-import { US_STATES } from '../data/usStates';
 import {
   formatDateLabel,
+  formatResendLabel,
+  parseMmDdYyyyToIso,
   validatePatientLookup,
-  validatePatientRegistration,
+  validatePhoneNumber,
+  validateVerificationCode,
 } from '../utils/appointments';
-import { InsuranceCompanyCombobox } from './InsuranceCompanyCombobox';
-import { ThemedSelect } from './ThemedSelect';
+import type { VerifiedRegistrationSeed } from './NewPatientRegistrationPage';
+import { SegmentedDateInput } from './SegmentedDateInput';
 
 interface PatientEntryFormProps {
   idPrefix?: string;
@@ -24,66 +31,47 @@ interface PatientEntryFormProps {
     patient: PatientProfile,
     kind: 'established' | 'new'
   ) => Promise<void> | void;
+  onPhoneVerifiedForRegistration: (seed: VerifiedRegistrationSeed) => void;
   onCancel?: () => void;
 }
+
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export function PatientEntryForm({
   idPrefix = 'patient',
   submitLabel = 'Continue',
   samplePatients,
   onPatientReady,
+  onPhoneVerifiedForRegistration,
   onCancel,
 }: PatientEntryFormProps) {
   const quickSamples = samplePatients ?? [];
-  const [stage, setStage] = useState<'lookup' | 'register'>('lookup');
+  const [stage, setStage] = useState<'lookup' | 'verify-phone'>('lookup');
   const [fullName, setFullName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
+
+  // Phone verification state
   const [phone, setPhone] = useState('');
-  const [age, setAge] = useState('');
-  const [sex, setSex] = useState('');
-  const [street, setStreet] = useState('');
-  const [city, setCity] = useState('');
-  const [stateVal, setStateVal] = useState('');
-  const [pin, setPin] = useState('');
-  const [paymentType, setPaymentType] = useState<'insurance' | 'self-pay'>(
-    'insurance'
-  );
-  const [insuranceProvider, setInsuranceProvider] = useState('');
-  const [insuranceMemberId, setInsuranceMemberId] = useState('');
-  const [insuranceCompanies, setInsuranceCompanies] = useState<string[]>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [previewCode, setPreviewCode] = useState('');
+  const [sendingCode, setSendingCode] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
 
+  // 60s countdown timer for Resend Code button
   useEffect(() => {
-    if (stage !== 'register' || insuranceCompanies.length > 0) return;
-    let cancelled = false;
-    setLoadingCompanies(true);
-
-    fetchInsuranceCompanies()
-      .then((list) => {
-        if (!cancelled) {
-          setInsuranceCompanies(
-            list.length > 0 ? list : DEFAULT_INSURANCE_COMPANIES
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setInsuranceCompanies(DEFAULT_INSURANCE_COMPANIES);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingCompanies(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [stage, insuranceCompanies.length]);
+    if (stage !== 'verify-phone' || !codeSent || resendCountdown <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setResendCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [stage, codeSent, resendCountdown]);
 
   const handleLookupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,15 +85,21 @@ export function PatientEntryForm({
     setServerError('');
     setSubmitting(true);
     try {
+      const normalizedDob =
+        parseMmDdYyyyToIso(dateOfBirth.trim()) || dateOfBirth.trim();
       const result = await lookupPatient({
         fullName: fullName.trim(),
-        dateOfBirth: dateOfBirth.trim(),
+        dateOfBirth: normalizedDob,
       });
 
       if (result.found && result.patient) {
         await onPatientReady(result.patient, 'established');
       } else {
-        setStage('register');
+        setCodeSent(false);
+        setVerificationCode('');
+        setPreviewCode('');
+        setResendCountdown(0);
+        setStage('verify-phone');
       }
     } catch (err) {
       setServerError(
@@ -118,24 +112,48 @@ export function PatientEntryForm({
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleSendCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const phoneErr = validatePhoneNumber(phone);
+    if (phoneErr) {
+      setErrors({ phone: phoneErr });
+      return;
+    }
+
+    setErrors({});
+    setServerError('');
+    setSendingCode(true);
+    try {
+      const res = await sendPhoneVerificationCode({ phone: phone.trim() });
+      setCodeSent(true);
+      setPreviewCode(res.previewCode);
+      setVerificationCode('');
+      setResendCountdown(RESEND_COOLDOWN_SECONDS);
+    } catch (err) {
+      setServerError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to send verification code. Please try again.'
+      );
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleVerifyCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validatePatientRegistration({
-      fullName,
-      dateOfBirth,
-      phone,
-      age,
-      sex,
-      street,
-      city,
-      state: stateVal,
-      pin,
-      paymentType,
-      insuranceProvider,
-      insuranceMemberId,
-    });
-    if (Object.keys(validation).length > 0) {
-      setErrors(validation);
+    if (!codeSent) {
+      await handleSendCode();
+      return;
+    }
+
+    const phoneErr = validatePhoneNumber(phone);
+    const codeErr = validateVerificationCode(verificationCode);
+    if (phoneErr || codeErr) {
+      setErrors({
+        ...(phoneErr ? { phone: phoneErr } : {}),
+        ...(codeErr ? { verificationCode: codeErr } : {}),
+      });
       return;
     }
 
@@ -143,26 +161,21 @@ export function PatientEntryForm({
     setServerError('');
     setSubmitting(true);
     try {
-      const created = await registerPatient({
+      const res = await verifyPhoneVerificationCode({
+        phone: phone.trim(),
+        code: verificationCode.trim(),
+      });
+      onPhoneVerifiedForRegistration({
         fullName: fullName.trim(),
         dateOfBirth: dateOfBirth.trim(),
         phone: phone.trim(),
-        sex: sex.trim(),
-        street: street.trim(),
-        city: city.trim(),
-        state: stateVal.trim(),
-        pin: pin.trim(),
-        insuranceProvider:
-          paymentType === 'insurance' ? insuranceProvider.trim() : 'Self-Pay',
-        memberId:
-          paymentType === 'insurance' ? insuranceMemberId.trim() : 'SELF-PAY',
+        phoneVerificationToken: res.verificationToken,
       });
-      await onPatientReady(created, 'new');
     } catch (err) {
       setServerError(
         err instanceof Error
           ? err.message
-          : 'Unable to complete patient registration. Please try again.'
+          : 'Invalid verification code. Please try again.'
       );
     } finally {
       setSubmitting(false);
@@ -174,466 +187,267 @@ export function PatientEntryForm({
     setFullName(sample.fullName);
     setDateOfBirth(sample.dateOfBirth);
     setPhone('');
-    setAge('');
-    setSex('');
-    setStreet('');
-    setCity('');
-    setStateVal('');
-    setPin('');
-    setPaymentType('insurance');
-    setInsuranceProvider('');
-    setInsuranceMemberId('');
+    setCodeSent(false);
+    setVerificationCode('');
+    setPreviewCode('');
+    setResendCountdown(0);
     setErrors({});
     setServerError('');
   };
 
-  if (stage === 'register') {
+  if (stage === 'verify-phone') {
+    const resendDisabled = sendingCode || submitting || resendCountdown > 0;
     return (
-      <form onSubmit={handleRegisterSubmit} className="space-y-3.5" noValidate>
+      <form
+        onSubmit={handleVerifyCodeSubmit}
+        className="space-y-4"
+        noValidate
+      >
         <div
           role="status"
-          className="flex items-start gap-3 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-sm text-teal-950 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-100"
+          className="flex items-start gap-3 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm text-teal-950 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-100"
         >
-          <UserPlus
+          <ShieldCheck
             className="mt-0.5 h-4 w-4 shrink-0 text-teal-700 dark:text-teal-300"
             aria-hidden="true"
           />
           <div>
-            <p className="font-semibold text-xs">New Patient Registration</p>
+            <p className="font-semibold text-xs">Verify Phone Number</p>
             <p className="mt-0.5 text-xs text-teal-900/90 dark:text-teal-200/90">
               No existing record found for{' '}
               <span className="font-semibold">{fullName.trim()}</span> (
               <span className="font-mono tabular-nums">
                 {formatDateLabel(dateOfBirth.trim())}
               </span>
-              ). Please complete your registration details below.
+              ). Please verify your mobile phone number to continue to
+              registration.
             </p>
           </div>
         </div>
 
-        <div className="grid gap-2.5 sm:grid-cols-2">
-          <div className="min-w-0">
+        <div>
+          <div className="flex items-center justify-between gap-2">
             <label
-              htmlFor={`${idPrefix}-reg-full-name`}
-              className="block text-xs font-medium text-slate-800 dark:text-slate-200"
+              htmlFor={`${idPrefix}-verify-phone`}
+              className="block text-sm font-medium text-slate-800 dark:text-slate-200"
             >
-              Full Name
+              Mobile Phone Number
             </label>
-            <input
-              id={`${idPrefix}-reg-full-name`}
-              type="text"
-              value={fullName}
-              disabled
-              readOnly
-              className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 min-h-[36px]"
-            />
+            {codeSent ? (
+              <button
+                type="button"
+                disabled={submitting || sendingCode}
+                onClick={() => {
+                  setCodeSent(false);
+                  setVerificationCode('');
+                  setPreviewCode('');
+                  setResendCountdown(0);
+                  setErrors({});
+                  setServerError('');
+                }}
+                className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+              >
+                Change number
+              </button>
+            ) : null}
           </div>
 
-          <div className="min-w-0">
-            <label
-              htmlFor={`${idPrefix}-reg-dob`}
-              className="block text-xs font-medium text-slate-800 dark:text-slate-200"
-            >
-              Date of Birth
-            </label>
-            <input
-              id={`${idPrefix}-reg-dob`}
-              type="text"
-              value={formatDateLabel(dateOfBirth)}
-              disabled
-              readOnly
-              className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-mono font-medium tabular-nums text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 min-h-[36px]"
+          <div className="relative mt-1.5">
+            <Phone
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              aria-hidden="true"
             />
-          </div>
-        </div>
-
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          <div className="min-w-0">
-            <label
-              htmlFor={`${idPrefix}-reg-phone`}
-              className="block text-xs font-medium text-slate-800 dark:text-slate-200"
-            >
-              Mobile Phone
-            </label>
             <input
-              id={`${idPrefix}-reg-phone`}
+              id={`${idPrefix}-verify-phone`}
               type="tel"
               autoComplete="tel"
               value={phone}
+              disabled={codeSent || sendingCode || submitting}
               onChange={(e) => {
                 setPhone(e.target.value);
                 if (errors.phone) {
                   setErrors((prev) => ({ ...prev, phone: '' }));
                 }
               }}
-              disabled={submitting}
               aria-required="true"
               aria-invalid={Boolean(errors.phone)}
               aria-describedby={
-                errors.phone ? `${idPrefix}-reg-phone-err` : undefined
+                errors.phone ? `${idPrefix}-verify-phone-err` : undefined
               }
               placeholder="(512) 555-0199"
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[36px]"
-            />
-            {errors.phone ? (
-              <p
-                id={`${idPrefix}-reg-phone-err`}
-                role="alert"
-                className="mt-1 text-[11px] font-medium text-rose-700 dark:text-rose-400"
-              >
-                {errors.phone}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="min-w-0">
-            <label
-              htmlFor={`${idPrefix}-reg-age`}
-              className="block text-xs font-medium text-slate-800 dark:text-slate-200"
-            >
-              Age
-            </label>
-            <input
-              id={`${idPrefix}-reg-age`}
-              type="number"
-              min="0"
-              max="120"
-              value={age}
-              onChange={(e) => {
-                setAge(e.target.value);
-                if (errors.age) {
-                  setErrors((prev) => ({ ...prev, age: '' }));
-                }
-              }}
-              disabled={submitting}
-              aria-required="true"
-              aria-invalid={Boolean(errors.age)}
-              aria-describedby={
-                errors.age ? `${idPrefix}-reg-age-err` : undefined
-              }
-              placeholder="e.g. 36"
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[36px]"
-            />
-            {errors.age ? (
-              <p
-                id={`${idPrefix}-reg-age-err`}
-                role="alert"
-                className="mt-1 text-[11px] font-medium text-rose-700 dark:text-rose-400"
-              >
-                {errors.age}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="min-w-0">
-            <label
-              id={`${idPrefix}-reg-sex-label`}
-              onClick={() =>
-                document.getElementById(`${idPrefix}-reg-sex`)?.focus()
-              }
-              className="block text-xs font-medium text-slate-800 dark:text-slate-200"
-            >
-              Sex
-            </label>
-            <ThemedSelect
-              id={`${idPrefix}-reg-sex`}
-              labelId={`${idPrefix}-reg-sex-label`}
-              value={sex}
-              onChange={(val) => {
-                setSex(val);
-                if (errors.sex) {
-                  setErrors((prev) => ({ ...prev, sex: '' }));
-                }
-              }}
-              options={[
-                { value: 'Female', label: 'Female' },
-                { value: 'Male', label: 'Male' },
-                { value: 'Other', label: 'Other' },
-                { value: 'Prefer not to say', label: 'Prefer not to say' },
-              ]}
-              placeholder="Select sex"
-              disabled={submitting}
-              required
-              invalid={Boolean(errors.sex)}
-              describedBy={errors.sex ? `${idPrefix}-reg-sex-err` : undefined}
-              size="xs"
-            />
-            {errors.sex ? (
-              <p
-                id={`${idPrefix}-reg-sex-err`}
-                role="alert"
-                className="mt-1 text-[11px] font-medium text-rose-700 dark:text-rose-400"
-              >
-                {errors.sex}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <fieldset className="min-w-0 space-y-2 rounded-lg border border-slate-200/80 bg-slate-50/50 p-2.5 dark:border-slate-800 dark:bg-slate-950/40">
-          <legend className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-200">
-            Address
-          </legend>
-          <div className="min-w-0">
-            <label
-              htmlFor={`${idPrefix}-reg-street`}
-              className="block text-[11px] font-medium text-slate-700 dark:text-slate-300"
-            >
-              Street Address
-            </label>
-            <input
-              id={`${idPrefix}-reg-street`}
-              type="text"
-              autoComplete="street-address"
-              value={street}
-              onChange={(e) => {
-                setStreet(e.target.value);
-                if (errors.address) {
-                  setErrors((prev) => ({ ...prev, address: '' }));
-                }
-              }}
-              disabled={submitting}
-              aria-required="true"
-              placeholder="e.g. 100 Main St"
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[34px]"
+              className={`w-full rounded-lg border pl-9 pr-3.5 py-2.5 text-sm font-mono min-h-[42px] ${
+                codeSent
+                  ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'
+                  : 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100'
+              }`}
             />
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="min-w-0">
-              <label
-                htmlFor={`${idPrefix}-reg-city`}
-                className="block text-[11px] font-medium text-slate-700 dark:text-slate-300"
-              >
-                City
-              </label>
-              <input
-                id={`${idPrefix}-reg-city`}
-                type="text"
-                autoComplete="address-level2"
-                value={city}
-                onChange={(e) => {
-                  setCity(e.target.value);
-                  if (errors.address) {
-                    setErrors((prev) => ({ ...prev, address: '' }));
-                  }
-                }}
-                disabled={submitting}
-                aria-required="true"
-                placeholder="Austin"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[34px]"
-              />
-            </div>
-            <div className="min-w-0">
-              <label
-                id={`${idPrefix}-reg-state-label`}
-                onClick={() =>
-                  document.getElementById(`${idPrefix}-reg-state`)?.focus()
-                }
-                className="block text-[11px] font-medium text-slate-700 dark:text-slate-300"
-              >
-                State
-              </label>
-              <ThemedSelect
-                id={`${idPrefix}-reg-state`}
-                labelId={`${idPrefix}-reg-state-label`}
-                value={stateVal}
-                onChange={(val) => {
-                  setStateVal(val);
-                  if (errors.address) {
-                    setErrors((prev) => ({ ...prev, address: '' }));
-                  }
-                }}
-                options={US_STATES.map((st) => ({
-                  value: st.code,
-                  label: `${st.name} (${st.code})`,
-                }))}
-                placeholder="Select state"
-                disabled={submitting}
-                required
-                invalid={Boolean(errors.address && !stateVal)}
-                size="xs"
-              />
-            </div>
-            <div className="min-w-0">
-              <label
-                htmlFor={`${idPrefix}-reg-pin`}
-                className="block text-[11px] font-medium text-slate-700 dark:text-slate-300"
-              >
-                Zip Code
-              </label>
-              <input
-                id={`${idPrefix}-reg-pin`}
-                type="text"
-                autoComplete="postal-code"
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value);
-                  if (errors.address) {
-                    setErrors((prev) => ({ ...prev, address: '' }));
-                  }
-                }}
-                disabled={submitting}
-                aria-required="true"
-                placeholder="78756"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[36px]"
-              />
-            </div>
-          </div>
-          {errors.address ? (
+          {errors.phone ? (
             <p
+              id={`${idPrefix}-verify-phone-err`}
               role="alert"
-              className="text-[11px] font-medium text-rose-700 dark:text-rose-400"
+              className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
             >
-              {errors.address}
+              {errors.phone}
             </p>
           ) : null}
-        </fieldset>
-
-        <div>
-          <label className="block text-xs font-medium text-slate-800 dark:text-slate-200">
-            Payment Type
-          </label>
-          <div className="mt-1.5 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setPaymentType('insurance')}
-              aria-pressed={paymentType === 'insurance'}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors min-h-[38px] ${
-                paymentType === 'insurance'
-                  ? 'border-teal-700 bg-teal-50 text-teal-900 dark:border-teal-400 dark:bg-teal-950/60 dark:text-teal-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
-              }`}
-            >
-              Insurance
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setPaymentType('self-pay');
-                setErrors((prev) => ({
-                  ...prev,
-                  insuranceProvider: '',
-                  insuranceMemberId: '',
-                }));
-              }}
-              aria-pressed={paymentType === 'self-pay'}
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors min-h-[38px] ${
-                paymentType === 'self-pay'
-                  ? 'border-teal-700 bg-teal-50 text-teal-900 dark:border-teal-400 dark:bg-teal-950/60 dark:text-teal-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
-              }`}
-            >
-              Self-Pay
-            </button>
-          </div>
         </div>
 
-        {paymentType === 'insurance' ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <InsuranceCompanyCombobox
-              id={`${idPrefix}-reg-ins-company`}
-              label="Insurance Company"
-              value={insuranceProvider}
-              onChange={(val) => {
-                setInsuranceProvider(val);
-                if (errors.insuranceProvider) {
-                  setErrors((prev) => ({ ...prev, insuranceProvider: '' }));
-                }
-              }}
-              companies={insuranceCompanies}
-              loading={loadingCompanies}
-              disabled={submitting}
-              error={errors.insuranceProvider}
-              errorId={`${idPrefix}-reg-ins-company-err`}
-            />
-
-            <div className="min-w-0">
+        {codeSent ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
               <label
-                htmlFor={`${idPrefix}-reg-ins-member`}
-                className="block text-xs font-medium text-slate-800 dark:text-slate-200"
+                htmlFor={`${idPrefix}-verify-code`}
+                className="block text-sm font-medium text-slate-800 dark:text-slate-200"
               >
-                Insurance Member ID
+                6-Digit Verification Code
               </label>
-              <input
-                id={`${idPrefix}-reg-ins-member`}
-                type="text"
-                value={insuranceMemberId}
-                onChange={(e) => {
-                  setInsuranceMemberId(e.target.value);
-                  if (errors.insuranceMemberId) {
-                    setErrors((prev) => ({ ...prev, insuranceMemberId: '' }));
-                  }
-                }}
-                disabled={submitting}
-                aria-required="true"
-                aria-invalid={Boolean(errors.insuranceMemberId)}
-                aria-describedby={
-                  errors.insuranceMemberId
-                    ? `${idPrefix}-reg-ins-member-err`
-                    : undefined
-                }
-                placeholder="e.g. BCB-884120"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[38px]"
-              />
-              {errors.insuranceMemberId ? (
-                <p
-                  id={`${idPrefix}-reg-ins-member-err`}
-                  role="alert"
-                  className="mt-1 text-[11px] font-medium text-rose-700 dark:text-rose-400"
-                >
-                  {errors.insuranceMemberId}
-                </p>
-              ) : null}
+              <button
+                type="button"
+                data-testid="resend-code-button"
+                disabled={resendDisabled}
+                onClick={() => handleSendCode()}
+                className={`font-mono text-xs font-semibold tabular-nums transition-colors ${
+                  resendDisabled
+                    ? 'cursor-not-allowed text-slate-400 dark:text-slate-500'
+                    : 'text-teal-700 hover:underline dark:text-teal-300'
+                }`}
+              >
+                {formatResendLabel(resendCountdown, sendingCode)}
+              </button>
             </div>
+            <input
+              id={`${idPrefix}-verify-code`}
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={verificationCode}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                setVerificationCode(digits);
+                if (errors.verificationCode) {
+                  setErrors((prev) => ({ ...prev, verificationCode: '' }));
+                }
+                if (serverError) setServerError('');
+              }}
+              disabled={submitting}
+              aria-required="true"
+              aria-invalid={Boolean(errors.verificationCode)}
+              aria-describedby={
+                errors.verificationCode
+                  ? `${idPrefix}-verify-code-err`
+                  : `${idPrefix}-verify-code-hint`
+              }
+              placeholder="Enter 6-digit code"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-mono tracking-widest text-slate-900 placeholder:tracking-normal placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[42px]"
+            />
+            {previewCode ? (
+              <p
+                id={`${idPrefix}-verify-code-hint`}
+                className="text-xs text-slate-600 dark:text-slate-300"
+              >
+                Code sent to <span className="font-mono">{phone}</span> ·
+                Verification code:{' '}
+                <span
+                  data-testid="phone-preview-code"
+                  className="font-mono font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  {previewCode}
+                </span>
+              </p>
+            ) : null}
+            {errors.verificationCode ? (
+              <p
+                id={`${idPrefix}-verify-code-err`}
+                role="alert"
+                className="text-xs font-medium text-rose-700 dark:text-rose-400"
+              >
+                {errors.verificationCode}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
         {serverError ? (
           <p
             role="alert"
-            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200"
+            className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200"
           >
             {serverError}
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="flex flex-nowrap items-center justify-between gap-2 sm:gap-3 pt-1">
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || sendingCode}
             onClick={() => {
               setStage('lookup');
+              setResendCountdown(0);
               setErrors({});
               setServerError('');
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[38px]"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:px-4 sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[40px]"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>Back</span>
           </button>
 
-          <button
-            type="submit"
-            disabled={submitting}
-            aria-busy={submitting}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 py-2 text-xs font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 min-h-[38px]"
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : null}
-            <span>
-              {submitting
-                ? 'Registering Patient...'
-                : 'Complete Registration & Continue'}
-            </span>
-          </button>
+          {!codeSent ? (
+            <button
+              type="submit"
+              disabled={sendingCode}
+              aria-busy={sendingCode}
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
+            >
+              {sendingCode ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+              ) : null}
+              <span>
+                {sendingCode ? (
+                  'Sending...'
+                ) : (
+                  <>
+                    <span className="sm:hidden">Send Code</span>
+                    <span className="hidden sm:inline">
+                      Send Verification Code
+                    </span>
+                  </>
+                )}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+              ) : null}
+              <span>
+                {submitting ? (
+                  'Verifying...'
+                ) : (
+                  <>
+                    <span className="sm:hidden">Verify Phone</span>
+                    <span className="hidden sm:inline">
+                      Verify Phone Number
+                    </span>
+                  </>
+                )}
+              </span>
+            </button>
+          )}
         </div>
       </form>
     );
   }
 
   return (
-    <form onSubmit={handleLookupSubmit} className="space-y-3.5" noValidate>
+    <form onSubmit={handleLookupSubmit} className="space-y-4" noValidate>
       <div className="space-y-3.5">
         <div>
           <label
@@ -680,24 +494,20 @@ export function PatientEntryForm({
           >
             Date of Birth
           </label>
-          <input
+          <SegmentedDateInput
             id={`${idPrefix}-dob`}
-            type="date"
-            autoComplete="bday"
             value={dateOfBirth}
-            onChange={(e) => {
-              setDateOfBirth(e.target.value);
+            onChange={(nextVal) => {
+              setDateOfBirth(nextVal);
               if (errors.dateOfBirth) {
                 setErrors((prev) => ({ ...prev, dateOfBirth: '' }));
               }
             }}
             disabled={submitting}
-            aria-required="true"
-            aria-invalid={Boolean(errors.dateOfBirth)}
-            aria-describedby={
+            invalid={Boolean(errors.dateOfBirth)}
+            describedBy={
               errors.dateOfBirth ? `${idPrefix}-dob-err` : undefined
             }
-            className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-mono text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[42px]"
           />
           {errors.dateOfBirth ? (
             <p
@@ -720,34 +530,46 @@ export function PatientEntryForm({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+      <div className="pt-1">
         {onCancel ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[44px]"
-          >
-            Cancel
-          </button>
-        ) : (
-          <span />
-        )}
+          <div className="flex flex-nowrap items-center justify-between gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
+            >
+              Cancel
+            </button>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          aria-busy={submitting}
-          className={`inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 min-h-[44px] ${
-            onCancel ? '' : 'w-full'
-          }`}
-        >
-          {submitting ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <UserCheck className="h-4 w-4" aria-hidden="true" />
-          )}
-          <span>{submitting ? 'Checking Record...' : submitLabel}</span>
-        </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-xs sm:px-5 sm:py-2.5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <UserCheck className="h-4 w-4" aria-hidden="true" />
+              )}
+              <span>{submitting ? 'Checking Record...' : submitLabel}</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={submitting}
+            aria-busy={submitting}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 min-h-[42px] sm:min-h-[44px]"
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <UserCheck className="h-4 w-4" aria-hidden="true" />
+            )}
+            <span>{submitting ? 'Checking Record...' : submitLabel}</span>
+          </button>
+        )}
       </div>
 
       {quickSamples.length > 0 ? (
@@ -761,7 +583,7 @@ export function PatientEntryForm({
                 key={sample.label}
                 type="button"
                 onClick={() => handleFillSample(sample)}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[36px]"
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[36px]"
               >
                 {sample.label}
               </button>

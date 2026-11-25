@@ -81,7 +81,7 @@ export function AppointmentsView({
       aria-labelledby="appointments-directory-heading"
       className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
     >
-      <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5 dark:border-slate-800">
         <div>
           <h1
             id="appointments-directory-heading"
@@ -224,7 +224,7 @@ export function AppointmentsView({
               <li
                 key={appt.id}
                 data-appointment-id={appt.id}
-                className="px-5 py-3.5 transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                className="px-4 py-3 sm:px-5 sm:py-3.5 transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0 space-y-1">
@@ -235,46 +235,26 @@ export function AppointmentsView({
                       </h2>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
                       <span className="inline-flex items-center gap-1.5 font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                        <Calendar className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                        <Calendar
+                          className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0"
+                          aria-hidden="true"
+                        />
                         <span>{formatDateLabel(appt.date)}</span>
-                        <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0 ml-0.5" aria-hidden="true" />
+                        <Clock
+                          className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0 ml-1"
+                          aria-hidden="true"
+                        />
                         <span>{formatTime12h(appt.time24)}</span>
                         <span className="font-sans font-normal text-slate-500 dark:text-slate-400">
                           ({appt.durationMinutes} min)
                         </span>
                       </span>
-
-                      <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
-                        <User className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
-                        <span>
-                          <span className="font-medium text-slate-900 dark:text-slate-100">
-                            {appt.providerName}
-                          </span>
-                          <span className="text-slate-500 dark:text-slate-400">
-                            , {appt.providerCredentials}
-                          </span>
-                        </span>
-                      </span>
-
-                      <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                        <MapPin className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
-                        <span>{appt.locationName}</span>
-                      </span>
                     </div>
-
-                    {appt.status === 'rescheduled' && appt.previousDate ? (
-                      <p className="text-xs text-amber-800 dark:text-amber-300">
-                        Moved from {formatDateLabel(appt.previousDate)} at{' '}
-                        <span className="font-mono tabular-nums">
-                          {formatTime12h(appt.previousTime24 || '')}
-                        </span>
-                      </p>
-                    ) : null}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center shrink-0">
                     <button
                       type="button"
                       aria-expanded={isExpanded}
@@ -282,9 +262,9 @@ export function AppointmentsView({
                       onClick={() =>
                         setExpandedId(isExpanded ? null : appt.id)
                       }
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap min-h-[36px]"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap min-h-[36px]"
                     >
-                      <span>Details &amp; Prep</span>
+                      <span>Details</span>
                       {isExpanded ? (
                         <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                       ) : (
@@ -296,7 +276,7 @@ export function AppointmentsView({
                       type="button"
                       onClick={() => handleDownloadIcs(appt)}
                       aria-label={`Download calendar file for ${appt.appointmentTypeName} on ${formatDateLabel(appt.date)}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap min-h-[36px]"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap min-h-[36px]"
                     >
                       <Download className="h-3.5 w-3.5" aria-hidden="true" />
                       <span>Calendar</span>
@@ -331,46 +311,48 @@ export function AppointmentsView({
                     id={`details-${appt.id}`}
                     className="mt-3 grid gap-4 border-t border-slate-100 pt-3 text-xs sm:grid-cols-2 dark:border-slate-800/80"
                   >
-                    <div className="space-y-1">
-                      <p className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Location &amp; Notes
-                      </p>
-                      <p className="text-slate-700 dark:text-slate-200">
-                        {appt.locationAddress}
-                      </p>
-                      {appt.reasonForVisit ? (
-                        <p className="text-slate-600 dark:text-slate-300">
-                          <span className="font-medium text-slate-800 dark:text-slate-200">
-                            Visit note:{' '}
-                          </span>
-                          {appt.reasonForVisit}
-                        </p>
-                      ) : null}
-                      {appt.accommodations.length > 0 ? (
-                        <p className="text-slate-600 dark:text-slate-300">
-                          <span className="font-medium text-slate-800 dark:text-slate-200">
-                            Accommodations:{' '}
-                          </span>
-                          {appt.accommodations.join(', ')}
-                        </p>
-                      ) : null}
-                    </div>
+                    <dl className="space-y-2">
+                      <div className="flex items-start gap-2">
+                        <User
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400"
+                          aria-hidden="true"
+                        />
+                        <div>
+                          <dt className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Specialist
+                          </dt>
+                          <dd className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">
+                            {appt.providerName}, {appt.providerCredentials}
+                          </dd>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <MapPin
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400"
+                          aria-hidden="true"
+                        />
+                        <div>
+                          <dt className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Location
+                          </dt>
+                          <dd className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">
+                            {appt.locationName}
+                          </dd>
+                          <dd className="text-slate-600 dark:text-slate-300">
+                            {appt.locationAddress}
+                          </dd>
+                        </div>
+                      </div>
+                    </dl>
 
                     <div>
                       <p className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Preparation Checklist
+                        Visit Reason
                       </p>
-                      {appt.preparationInstructions.length > 0 ? (
-                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-600 dark:text-slate-300">
-                          {appt.preparationInstructions.map((item, i) => (
-                            <li key={i}>{item}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-1 text-slate-500 dark:text-slate-400">
-                          No special preparation required for this visit.
-                        </p>
-                      )}
+                      <p className="mt-1 text-slate-700 dark:text-slate-200">
+                        {appt.reasonForVisit || 'Not specified'}
+                      </p>
                     </div>
                   </div>
                 ) : null}

@@ -45,6 +45,7 @@ export function CancelModal({
       : DEFAULT_CANCELLATION_REASONS;
   const [selectedReason, setSelectedReason] = useState('');
   const [customNote, setCustomNote] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<ValidationErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -53,6 +54,7 @@ export function CancelModal({
     if (!appointment) return;
     setSelectedReason('');
     setCustomNote('');
+    setConfirmed(false);
     setFieldErrors({});
     setErrorMessage('');
   }, [appointment]);
@@ -72,7 +74,11 @@ export function CancelModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validateCancellationReason(selectedReason, customNote);
+    const validation = validateCancellationReason(
+      selectedReason,
+      customNote,
+      confirmed
+    );
     if (Object.keys(validation).length > 0) {
       setFieldErrors(validation);
       return;
@@ -115,7 +121,7 @@ export function CancelModal({
         aria-labelledby="cancel-dialog-title"
         className="w-full max-w-lg rounded-xl border border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5 dark:border-slate-800">
           <div className="flex items-start gap-3">
             <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">
               <AlertTriangle className="h-5 w-5" aria-hidden="true" />
@@ -143,7 +149,7 @@ export function CancelModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4 sm:space-y-5 sm:px-6 sm:py-5" noValidate>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
             <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
               {appointment.appointmentTypeName}
@@ -253,6 +259,51 @@ export function CancelModal({
             close this dialog and choose Reschedule.
           </p>
 
+          <div>
+            <label
+              htmlFor="cancel-confirm-checkbox"
+              className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3.5 py-3 text-sm transition-colors ${
+                fieldErrors.confirmed
+                  ? 'border-rose-400 bg-rose-50/70 text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100'
+                  : confirmed
+                    ? 'border-teal-700 bg-teal-50/60 text-slate-900 dark:border-teal-400 dark:bg-teal-950/40 dark:text-slate-100'
+                    : 'border-slate-200 bg-slate-50/70 text-slate-800 hover:bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200'
+              }`}
+            >
+              <input
+                id="cancel-confirm-checkbox"
+                type="checkbox"
+                checked={confirmed}
+                disabled={submitting}
+                aria-required="true"
+                aria-invalid={Boolean(fieldErrors.confirmed)}
+                aria-describedby={
+                  fieldErrors.confirmed ? 'cancel-confirm-err' : undefined
+                }
+                onChange={(e) => {
+                  setConfirmed(e.target.checked);
+                  if (fieldErrors.confirmed) {
+                    setFieldErrors((prev) => ({ ...prev, confirmed: '' }));
+                  }
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-rose-700 focus:ring-rose-600 dark:border-slate-600"
+              />
+              <span className="text-xs sm:text-sm font-medium leading-snug">
+                I confirm that I want to cancel this appointment and release the
+                scheduled visit time.
+              </span>
+            </label>
+            {fieldErrors.confirmed ? (
+              <p
+                id="cancel-confirm-err"
+                role="alert"
+                className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
+              >
+                {fieldErrors.confirmed}
+              </p>
+            ) : null}
+          </div>
+
           {errorMessage ? (
             <p
               role="alert"
@@ -262,26 +313,34 @@ export function CancelModal({
             </p>
           ) : null}
 
-          <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end dark:border-slate-800">
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:justify-end sm:gap-3 dark:border-slate-800">
             <button
               type="button"
               disabled={submitting}
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 min-h-[44px]"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
             >
-              Keep Appointment
+              <span className="sm:hidden">Keep Visit</span>
+              <span className="hidden sm:inline">Keep Appointment</span>
             </button>
             <button
               type="submit"
               disabled={submitting}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-60 dark:bg-rose-600 dark:hover:bg-rose-500 min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-rose-700 px-3.5 py-2 text-xs sm:px-5 sm:py-2.5 sm:text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-60 dark:bg-rose-600 dark:hover:bg-rose-500 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
               ) : null}
               <span>
-                {submitting ? 'Cancelling...' : 'Confirm Cancellation'}
+                {submitting ? (
+                  'Cancelling...'
+                ) : (
+                  <>
+                    <span className="sm:hidden">Cancel Visit</span>
+                    <span className="hidden sm:inline">Confirm Cancellation</span>
+                  </>
+                )}
               </span>
             </button>
           </div>

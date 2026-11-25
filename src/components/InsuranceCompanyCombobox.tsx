@@ -129,7 +129,7 @@ export function InsuranceCompanyCombobox({
         {label}
       </label>
 
-      <div className="relative mt-1 min-w-0">
+      <div className="relative mt-1.5 min-w-0">
         <input
           ref={inputRef}
           id={id}
@@ -159,7 +159,7 @@ export function InsuranceCompanyCombobox({
           placeholder={placeholder}
           className={`w-full min-w-0 rounded-lg border border-slate-300 bg-white pl-3 ${
             value && !disabled ? 'pr-14' : 'pr-8'
-          } py-2 text-xs text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[38px]`}
+          } py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]`}
         />
 
         <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">

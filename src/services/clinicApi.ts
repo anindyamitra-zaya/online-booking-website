@@ -6,6 +6,8 @@ import type {
   ClinicProfile,
   PatientLookupResult,
   PatientProfile,
+  PhoneVerificationSendResult,
+  PhoneVerificationVerifyResult,
   Provider,
   TimeSlot,
   VisitMode,
@@ -50,10 +52,14 @@ export const API_ENDPOINTS = {
   cancelAppointment: (id: string) =>
     `${API_BASE}/api/appointments/${encodeURIComponent(id)}/cancel`,
   patientLookup: `${API_BASE}/api/patients/lookup`,
+  patientPhoneVerificationSend: `${API_BASE}/api/patients/phone-verification/send`,
+  patientPhoneVerificationVerify: `${API_BASE}/api/patients/phone-verification/verify`,
   patientRegister: `${API_BASE}/api/patients/register`,
   patientById: (id: string) =>
     `${API_BASE}/api/patients/${encodeURIComponent(id)}`,
   insuranceCompanies: `${API_BASE}/api/insurance-companies`,
+  recaptchaConfig: `${API_BASE}/api/security/recaptcha-config`,
+  recaptchaChallenge: `${API_BASE}/api/security/recaptcha-challenge`,
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -149,10 +155,36 @@ export async function lookupPatient(payload: {
   return { found: false, status: 'new' };
 }
 
+export async function sendPhoneVerificationCode(payload: {
+  phone: string;
+}): Promise<PhoneVerificationSendResult> {
+  return requestJson<PhoneVerificationSendResult>(
+    API_ENDPOINTS.patientPhoneVerificationSend,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function verifyPhoneVerificationCode(payload: {
+  phone: string;
+  code: string;
+}): Promise<PhoneVerificationVerifyResult> {
+  return requestJson<PhoneVerificationVerifyResult>(
+    API_ENDPOINTS.patientPhoneVerificationVerify,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function registerPatient(payload: {
   fullName: string;
   dateOfBirth: string;
   phone: string;
+  phoneVerificationToken: string;
   email?: string;
   sex?: string;
   street?: string;
@@ -224,10 +256,33 @@ export async function fetchAvailability(params: {
   );
 }
 
+export async function fetchRecaptchaConfig(): Promise<{
+  mode: 'google' | 'preview';
+  siteKey: string | null;
+}> {
+  return requestJson<{ mode: 'google' | 'preview'; siteKey: string | null }>(
+    API_ENDPOINTS.recaptchaConfig
+  );
+}
+
+export async function createPreviewRecaptchaToken(): Promise<{
+  token: string;
+  expiresInSeconds: number;
+}> {
+  return requestJson<{ token: string; expiresInSeconds: number }>(
+    API_ENDPOINTS.recaptchaChallenge,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }
+  );
+}
+
 export async function createAppointment(
   patientId: string,
   clinicId: string,
-  draft: BookingDraft
+  draft: BookingDraft,
+  recaptchaToken: string
 ): Promise<Appointment> {
   return requestJson<Appointment>(API_ENDPOINTS.appointments, {
     method: 'POST',
@@ -235,6 +290,7 @@ export async function createAppointment(
       patientId,
       clinicId,
       ...draft,
+      recaptchaToken,
     }),
   });
 }

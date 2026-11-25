@@ -26,7 +26,6 @@ import {
   formatTime12h,
 } from './utils/appointments';
 import { TopBar, type PortalSection } from './components/TopBar';
-import { PatientBlock } from './components/PatientBlock';
 import { PatientVerificationGate } from './components/PatientVerificationGate';
 import { AppointmentsView } from './components/AppointmentsView';
 import { BookingWizard } from './components/BookingWizard';
@@ -84,6 +83,7 @@ export default function App() {
   const [bookingPreselect, setBookingPreselect] = useState<{
     appointmentTypeId?: string;
   }>({});
+  const [bookingSessionId, setBookingSessionId] = useState(0);
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(
     null
@@ -213,12 +213,14 @@ export default function App() {
     appointmentTypeId?: string;
   }) => {
     setBookingPreselect(preselect || {});
+    setBookingSessionId((prev) => prev + 1);
     setActiveSection('book');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCreateAppointment = async (
-    draft: BookingDraft
+    draft: BookingDraft,
+    recaptchaToken: string
   ): Promise<Appointment> => {
     if (!patient) {
       throw new Error(
@@ -226,7 +228,12 @@ export default function App() {
       );
     }
 
-    const created = await createAppointment(patient.id, clinic.id, draft);
+    const created = await createAppointment(
+      patient.id,
+      clinic.id,
+      draft,
+      recaptchaToken
+    );
     const refreshed = await fetchAppointments(patient.id, clinic.id);
     setAppointments(refreshed);
     showAnnouncement(
@@ -323,16 +330,19 @@ export default function App() {
 
       <TopBar
         clinicShortName={clinic.shortName}
-        isPatientVerified={Boolean(patient)}
+        patient={patient}
+        patientKind={patientKind}
         upcomingCount={upcomingCount}
         activeSection={activeSection}
         onNavigate={(section) => {
           if (section === 'book') {
             setBookingPreselect({});
+            setBookingSessionId((prev) => prev + 1);
           }
           setActiveSection(section);
         }}
         onStartBooking={() => handleStartBooking()}
+        onLogoutPatient={handleSignOutPatient}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -366,16 +376,8 @@ export default function App() {
       <main
         id="main-content"
         tabIndex={-1}
-        className="mx-auto w-full max-w-6xl flex-1 space-y-2.5 px-4 py-3 sm:px-6 lg:px-8 focus:outline-none"
+        className="mx-auto w-full max-w-7xl flex-1 flex flex-col px-4 py-4 sm:px-6 lg:px-8 focus:outline-none"
       >
-        {patient ? (
-          <PatientBlock
-            clinic={clinic}
-            patient={patient}
-            patientKind={patientKind}
-            onLogoutPatient={handleSignOutPatient}
-          />
-        ) : null}
 
         {!patient &&
         (activeSection === 'appointments' || activeSection === 'book') ? (
@@ -401,18 +403,15 @@ export default function App() {
 
         {patient && activeSection === 'book' ? (
           <BookingWizard
-            key={clinic.id}
+            key={`${clinic.id}-${bookingSessionId}`}
             clinic={clinic}
             providers={providers}
             appointmentTypes={appointmentTypes}
             patient={patient}
             appointments={appointments}
-            loadingAppointments={loadingAppointments}
             initialAppointmentTypeId={bookingPreselect.appointmentTypeId}
             onSubmitBooking={handleCreateAppointment}
             onFinishToAppointments={() => setActiveSection('appointments')}
-            onOpenReschedule={(appt) => setRescheduleTarget(appt)}
-            onOpenCancel={(appt) => setCancelTarget(appt)}
           />
         ) : null}
 
