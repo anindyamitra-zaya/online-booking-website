@@ -1,5 +1,6 @@
 import type { ClinicBundleConfig } from '../types/clinic';
 import { heartVascularConfig } from './clinics/heartVascular';
+import { mmcConfig } from './clinics/mmc';
 import { oakwoodFamilyConfig } from './clinics/oakwoodFamily';
 import { texasLungConfig } from './clinics/texasLung';
 
@@ -10,6 +11,7 @@ import { texasLungConfig } from './clinics/texasLung';
  */
 export const CLINIC_CONFIGS: Record<string, ClinicBundleConfig> = {
   'texas-lung': texasLungConfig,
+  mmc: mmcConfig,
   'heart-vascular': heartVascularConfig,
   'oakwood-family': oakwoodFamilyConfig,
 };

@@ -195,7 +195,7 @@ export function ThemedSelect({
             disabled
               ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'
               : isOpen
-                ? 'border-teal-700 bg-white text-slate-900 ring-1 ring-teal-700 dark:border-teal-400 dark:bg-slate-950 dark:text-slate-100 dark:ring-teal-400'
+                ? 'border-brand-primary bg-white text-slate-900 ring-1 ring-brand-ring dark:border-brand-primary dark:bg-slate-950 dark:text-slate-100'
                 : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600'
           }`}
         >
@@ -210,7 +210,7 @@ export function ThemedSelect({
           </span>
           <ChevronDown
             className={`h-4 w-4 shrink-0 text-slate-400 transition-transform dark:text-slate-500 ${
-              isOpen ? 'rotate-180 text-teal-700 dark:text-teal-400' : ''
+              isOpen ? 'rotate-180 text-brand-text dark:text-brand-text-dark' : ''
             }`}
             aria-hidden="true"
           />
@@ -246,7 +246,7 @@ export function ThemedSelect({
                 onMouseEnter={() => setActiveIndex(idx)}
                 className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
                   isSelected
-                    ? 'bg-teal-50 font-semibold text-teal-900 dark:bg-teal-950/70 dark:text-teal-100'
+                    ? 'bg-brand-soft-bg font-semibold text-brand-text dark:bg-brand-soft-bg-dark dark:text-brand-text-dark'
                     : isActive
                       ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
                       : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60'
@@ -255,7 +255,7 @@ export function ThemedSelect({
                 <span className="min-w-0 flex-1 truncate">{opt.label}</span>
                 {isSelected ? (
                   <Check
-                    className="h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-300"
+                    className="h-3.5 w-3.5 shrink-0 text-brand-text dark:text-brand-text-dark"
                     aria-hidden="true"
                   />
                 ) : null}

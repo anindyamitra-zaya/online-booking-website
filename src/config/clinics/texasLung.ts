@@ -11,7 +11,8 @@ export const texasLungConfig: ClinicBundleConfig = {
     phone: '(512) 555-0190',
     supportEmail: 'appointments@texaslungcare.example',
     cancellationPolicyHours: 24,
-    bannerImage: '/src/assets/images/clinic_atrium_interior_1795001144756.jpg',
+    bannerImage: '/src/assets/images/clinic_atrium_interior.webp',
+    themeColor: '#0f766e',
     brandAccent: 'teal',
     reschedulePolicy: {
       lockProvider: false,
@@ -61,11 +62,15 @@ export const texasLungConfig: ClinicBundleConfig = {
       {
         label: 'Established: Elena Vance',
         fullName: 'Elena Vance',
+        firstName: 'Elena',
+        lastName: 'Vance',
         dateOfBirth: '1984-05-14',
       },
       {
         label: 'New Patient: Jordan Taylor',
         fullName: 'Jordan Taylor',
+        firstName: 'Jordan',
+        lastName: 'Taylor',
         dateOfBirth: '1990-03-12',
       },
     ],

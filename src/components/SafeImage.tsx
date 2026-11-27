@@ -7,6 +7,10 @@ interface SafeImageProps {
   className?: string;
   fallbackType?: 'person' | 'clinic';
   fallbackLabel?: string;
+  width?: number;
+  height?: number;
+  loading?: 'eager' | 'lazy';
+  decoding?: 'async' | 'sync' | 'auto';
 }
 
 export function SafeImage({
@@ -15,6 +19,10 @@ export function SafeImage({
   className = '',
   fallbackType = 'person',
   fallbackLabel,
+  width,
+  height,
+  loading = 'eager',
+  decoding = 'async',
 }: SafeImageProps) {
   const [hasError, setHasError] = useState(false);
 
@@ -43,6 +51,10 @@ export function SafeImage({
     <img
       src={src}
       alt={alt}
+      width={width}
+      height={height}
+      loading={loading}
+      decoding={decoding}
       referrerPolicy="no-referrer"
       onError={() => setHasError(true)}
       className={className}

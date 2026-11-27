@@ -7,23 +7,39 @@
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
+@theme inline {
+  --color-brand-primary: var(--clinic-brand-primary, #0f766e);
+  --color-brand-hover: var(--clinic-brand-hover, #0c5e58);
+  --color-brand-fg: var(--clinic-brand-fg, #ffffff);
+  --color-brand-text: var(--clinic-brand-text, #0f766e);
+  --color-brand-text-dark: var(--clinic-brand-text-dark, #5eead4);
+  --color-brand-soft-bg: var(--clinic-brand-soft-bg, #e7f1f0);
+  --color-brand-soft-bg-dark: var(--clinic-brand-soft-bg-dark, #05181c);
+  --color-brand-soft-border: var(--clinic-brand-soft-border, #a4cbc8);
+  --color-brand-soft-border-dark: var(--clinic-brand-soft-border-dark, #0d4547);
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);
     font-size: 15.5px;
     font-weight: 500;
     scroll-behavior: smooth;
-    scrollbar-gutter: stable;
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   @media (min-width: 640px) {
     html {
       font-size: 17px;
+      scrollbar-gutter: stable;
     }
   }
 
   body {
     font-weight: 500;
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -32,12 +48,12 @@
 
   /* Ensure strong visible focus rings for keyboard & screen-reader users */
   :focus-visible {
-    outline: 2px solid #0d9488;
+    outline: 2px solid var(--clinic-brand-primary, #0d9488);
     outline-offset: 2px;
   }
 
   .dark :focus-visible {
-    outline-color: #2dd4bf;
+    outline-color: var(--clinic-brand-text-dark, #2dd4bf);
   }
 
   @media (prefers-reduced-motion: reduce) {

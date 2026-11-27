@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ArrowRight, CheckCircle2, MapPin, X } from 'lucide-react';
 import {
   DEFAULT_CLINIC_SLUG,
@@ -8,12 +17,14 @@ import {
 } from './config';
 import { DEFAULT_PATIENTS, REFERENCE_TODAY_ISO } from './data/seedClinicData';
 import {
+  ApiError,
   cancelAppointment,
   createAppointment,
   fetchAppointments,
   fetchPatientById,
   rescheduleAppointment,
   keepSessionAlive,
+  setOnSessionExpiredHandler,
   setSessionToken,
 } from './services/clinicApi';
 import type {
@@ -24,18 +35,57 @@ import type {
 } from './types/clinic';
 import {
   filterUpcomingAppointments,
-  formatDateLabel,
+  formatDateWithWeekday,
   formatTime12h,
 } from './utils/appointments';
+import { applyClinicThemeVariables } from './utils/theme';
 import { TopBar, type PortalSection } from './components/TopBar';
-import { PatientVerificationGate } from './components/PatientVerificationGate';
-import { AppointmentsView } from './components/AppointmentsView';
-import { BookingWizard } from './components/BookingWizard';
-import { CareTeamView } from './components/CareTeamView';
-import { ClinicInfoView } from './components/ClinicInfoView';
-import { RescheduleModal } from './components/RescheduleModal';
-import { CancelModal } from './components/CancelModal';
 import { SessionTimeoutModal } from './components/SessionTimeoutModal';
+import { ConfirmLeaveBookingModal } from './components/ConfirmLeaveBookingModal';
+import {
+  AppointmentsViewSkeleton,
+  BookingWizardSkeleton,
+  CareTeamSkeleton,
+  ClinicInfoSkeleton,
+  PatientVerificationSkeleton,
+} from './components/PortalSkeletons';
+import { Footer } from './components/Footer';
+
+const PatientVerificationGate = lazy(() =>
+  import('./components/PatientVerificationGate').then((m) => ({
+    default: m.PatientVerificationGate,
+  }))
+);
+const AppointmentsView = lazy(() =>
+  import('./components/AppointmentsView').then((m) => ({
+    default: m.AppointmentsView,
+  }))
+);
+const BookingWizard = lazy(() =>
+  import('./components/BookingWizard').then((m) => ({
+    default: m.BookingWizard,
+  }))
+);
+const CareTeamView = lazy(() =>
+  import('./components/CareTeamView').then((m) => ({
+    default: m.CareTeamView,
+  }))
+);
+const ClinicInfoView = lazy(() =>
+  import('./components/ClinicInfoView').then((m) => ({
+    default: m.ClinicInfoView,
+  }))
+);
+const RescheduleModal = lazy(() =>
+  import('./components/RescheduleModal').then((m) => ({
+    default: m.RescheduleModal,
+  }))
+);
+const CancelModal = lazy(() =>
+  import('./components/CancelModal').then((m) => ({
+    default: m.CancelModal,
+  }))
+);
 
 function getInitialTheme(): 'light' | 'dark' {
   if (typeof document !== 'undefined') {
@@ -48,6 +98,33 @@ function getInitialTheme(): 'light' | 'dark' {
 
 function getSessionKey(clinicId: string): string {
   return `clinic-portal-patient-id:${clinicId}`;
+}
+
+function getSectionFromUrl(): PortalSection {
+  if (typeof window === 'undefined') return 'appointments';
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  if (tab === 'book' || tab === 'team' || tab === 'clinic') {
+    return tab;
+  }
+  return 'appointments';
+}
+
+function syncSectionToUrl(section: PortalSection, replace = false) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (section === 'appointments') {
+    url.searchParams.delete('tab');
+  } else {
+    url.searchParams.set('tab', section);
+  }
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) return;
+  if (replace) {
+    window.history.replaceState({ section }, '', nextUrl);
+  } else {
+    window.history.pushState({ section }, '', nextUrl);
+  }
 }
 
 export default function App() {
@@ -72,7 +149,12 @@ export default function App() {
 
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [activeSection, setActiveSection] =
-    useState<PortalSection>('appointments');
+    useState<PortalSection>(getSectionFromUrl);
+  const [bookingHasUnsavedChanges, setBookingHasUnsavedChanges] =
+    useState(false);
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<
+    { type: 'navigate'; section: PortalSection } | { type: 'logout' } | null
+  >(null);
   const [patient, setPatient] = useState<PatientProfile | null>(null);
   const [patientKind, setPatientKind] = useState<'established' | 'new' | null>(
     null
@@ -94,7 +176,10 @@ export default function App() {
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
 
   const [announcement, setAnnouncement] = useState<string | null>(null);
-  const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+  const lastActivityTimeRef = useRef(Date.now());
+  const lastServerKeepAliveRef = useRef(Date.now());
+  const patientRef = useRef<PatientProfile | null>(null);
+  patientRef.current = patient;
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
 
   const showAnnouncement = useCallback((message: string) => {
@@ -108,9 +193,54 @@ export default function App() {
   }, [announcement]);
 
   useEffect(() => {
+    setOnSessionExpiredHandler((message) => {
+      const wasSignedIn = Boolean(patientRef.current);
+      setPatient(null);
+      setPatientKind(null);
+      setAppointments([]);
+      setAppointmentsError(null);
+      setRescheduleTarget(null);
+      setCancelTarget(null);
+      setShowTimeoutWarning(false);
+      setBookingHasUnsavedChanges(false);
+      setPendingLeaveAction(null);
+      setActiveSection('appointments');
+      syncSectionToUrl('appointments', true);
+      try {
+        sessionStorage.removeItem(getSessionKey(clinic.id));
+      } catch {}
+      if (wasSignedIn) {
+        showAnnouncement(
+          message ||
+            'Your session expired due to inactivity. Please verify your details again.'
+        );
+      }
+    });
+    return () => setOnSessionExpiredHandler(null);
+  }, [clinic.id, showAnnouncement]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setBookingHasUnsavedChanges(false);
+      setPendingLeaveAction(null);
+      setActiveSection(getSectionFromUrl());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
     if (!patient) return;
+    lastActivityTimeRef.current = Date.now();
+    lastServerKeepAliveRef.current = Date.now();
+
     const handleActivity = () => {
-      setLastActivityTime(Date.now());
+      const now = Date.now();
+      lastActivityTimeRef.current = now;
+      if (now - lastServerKeepAliveRef.current >= 2 * 60 * 1000) {
+        lastServerKeepAliveRef.current = now;
+        void keepSessionAlive();
+      }
     };
     window.addEventListener('mousemove', handleActivity);
     window.addEventListener('keydown', handleActivity);
@@ -119,13 +249,20 @@ export default function App() {
     window.addEventListener('touchstart', handleActivity);
 
     const interval = window.setInterval(() => {
-      const elapsed = Date.now() - lastActivityTime;
+      const elapsed = Date.now() - lastActivityTimeRef.current;
       if (elapsed >= 15 * 60 * 1000) {
         setPatient(null);
         setPatientKind(null);
         setAppointments([]);
+        setAppointmentsError(null);
+        setRescheduleTarget(null);
+        setCancelTarget(null);
         setSessionToken(null);
         setShowTimeoutWarning(false);
+        setBookingHasUnsavedChanges(false);
+        setPendingLeaveAction(null);
+        setActiveSection('appointments');
+        syncSectionToUrl('appointments', true);
         try {
           sessionStorage.removeItem(getSessionKey(clinic.id));
         } catch {}
@@ -143,7 +280,7 @@ export default function App() {
       window.removeEventListener('touchstart', handleActivity);
       window.clearInterval(interval);
     };
-  }, [patient, lastActivityTime, clinic.id, showAnnouncement]);
+  }, [patient, clinic.id, showAnnouncement]);
 
   const upcomingCount = useMemo(
     () =>
@@ -163,6 +300,10 @@ export default function App() {
   };
 
 
+
+  useLayoutEffect(() => {
+    applyClinicThemeVariables(clinic.themeColor);
+  }, [clinic.themeColor]);
 
   // Keep document title & metadata synced with whichever clinic config is active
   useEffect(() => {
@@ -194,6 +335,10 @@ export default function App() {
         setPatientKind('established');
         setAppointments(apptsRes);
       } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          setAppointmentsError(null);
+          return;
+        }
         setAppointmentsError(
           err instanceof Error
             ? err.message
@@ -227,15 +372,18 @@ export default function App() {
 
   const handlePatientVerified = useCallback(
     async (verified: PatientProfile, kind: 'established' | 'new') => {
+      setAppointmentsError(null);
+      const appts = await fetchAppointments(verified.id, clinic.id);
+      lastActivityTimeRef.current = Date.now();
+      lastServerKeepAliveRef.current = Date.now();
       setPatient(verified);
       setPatientKind(kind);
-      setLastActivityTime(Date.now());
+      setAppointments(appts);
       try {
         sessionStorage.setItem(getSessionKey(clinic.id), verified.id);
       } catch {}
-      const appts = await fetchAppointments(verified.id, clinic.id);
-      setAppointments(appts);
       setActiveSection('appointments');
+      syncSectionToUrl('appointments', true);
       showAnnouncement(
         kind === 'new'
           ? `Registered new patient profile for ${verified.fullName}.`
@@ -245,24 +393,67 @@ export default function App() {
     [clinic.id, showAnnouncement]
   );
 
-  const handleSignOutPatient = () => {
+  const performSectionNavigation = useCallback(
+    (section: PortalSection, options?: { replace?: boolean }) => {
+      if (section === 'book') {
+        setBookingPreselect({});
+        setBookingSessionId((prev) => prev + 1);
+      }
+      setBookingHasUnsavedChanges(false);
+      setActiveSection(section);
+      syncSectionToUrl(section, Boolean(options?.replace));
+    },
+    []
+  );
+
+  const handleSignOutPatient = useCallback(() => {
     setPatient(null);
     setPatientKind(null);
     setAppointments([]);
+    setAppointmentsError(null);
     setSessionToken(null);
     setShowTimeoutWarning(false);
+    setBookingHasUnsavedChanges(false);
+    setPendingLeaveAction(null);
     try {
       sessionStorage.removeItem(getSessionKey(clinic.id));
     } catch {}
     setActiveSection('appointments');
-  };
+    syncSectionToUrl('appointments', true);
+  }, [clinic.id]);
+
+  const handleNavigateRequest = useCallback(
+    (section: PortalSection) => {
+      if (
+        patient &&
+        activeSection === 'book' &&
+        section !== 'book' &&
+        bookingHasUnsavedChanges
+      ) {
+        setPendingLeaveAction({ type: 'navigate', section });
+        return;
+      }
+      performSectionNavigation(section);
+    },
+    [patient, activeSection, bookingHasUnsavedChanges, performSectionNavigation]
+  );
+
+  const handleLogoutRequest = useCallback(() => {
+    if (patient && activeSection === 'book' && bookingHasUnsavedChanges) {
+      setPendingLeaveAction({ type: 'logout' });
+      return;
+    }
+    handleSignOutPatient();
+  }, [patient, activeSection, bookingHasUnsavedChanges, handleSignOutPatient]);
 
   const handleStartBooking = (preselect?: {
     appointmentTypeId?: string;
   }) => {
     setBookingPreselect(preselect || {});
     setBookingSessionId((prev) => prev + 1);
+    setBookingHasUnsavedChanges(false);
     setActiveSection('book');
+    syncSectionToUrl('book');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -283,7 +474,7 @@ export default function App() {
     const refreshed = await fetchAppointments(patient.id, clinic.id);
     setAppointments(refreshed);
     showAnnouncement(
-      `Appointment confirmed for ${formatDateLabel(created.date)} at ${formatTime12h(created.time24)}.`
+      `Appointment confirmed for ${formatDateWithWeekday(created.date)} at ${formatTime12h(created.time24)}.`
     );
     return created;
   };
@@ -308,7 +499,7 @@ export default function App() {
       prev.map((a) => (a.id === updated.id ? updated : a))
     );
     showAnnouncement(
-      `Appointment rescheduled to ${formatDateLabel(updated.date)} at ${formatTime12h(updated.time24)}.`
+      `Appointment rescheduled to ${formatDateWithWeekday(updated.date)} at ${formatTime12h(updated.time24)}.`
     );
   };
 
@@ -316,61 +507,64 @@ export default function App() {
     const updated = await cancelAppointment(appointmentId, reason);
     setAppointments((prev) => prev.filter((a) => a.id !== updated.id));
     showAnnouncement(
-      `Your ${updated.appointmentTypeName} appointment on ${formatDateLabel(updated.date)} has been cancelled.`
+      `Your ${updated.appointmentTypeName} appointment on ${formatDateWithWeekday(updated.date)} has been cancelled.`
     );
   };
 
   if (resolvedRoute.isUnknownPath) {
     const configuredClinics = listConfiguredClinics();
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-8 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-        <main className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
-            Clinic Portal Template
-          </p>
-          <h1 className="mt-1 font-display text-2xl font-bold text-slate-900 dark:text-slate-50">
-            Clinic path &ldquo;/{resolvedRoute.slug}&rdquo; not configured
-          </h1>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-            Select a configured clinic portal path below, or add a clinic config
-            under <code className="font-mono text-xs">src/config/clinics/</code>.
-          </p>
-          <ul className="mt-5 divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
-            {configuredClinics.map((item) => (
-              <li key={item.slug}>
-                <a
-                  href={item.path}
-                  className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
-                      {item.name}
-                    </p>
-                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>{item.path}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{item.specialty}</span>
-                    </p>
-                  </div>
-                  <ArrowRight
-                    className="h-4 w-4 shrink-0 text-teal-700 dark:text-teal-300"
-                    aria-hidden="true"
-                  />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </main>
+      <div className="min-h-screen w-full overflow-x-clip flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <div className="flex flex-1 items-center justify-center px-4 py-8">
+          <main className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-text dark:text-brand-text-dark">
+              Clinic Portal Template
+            </p>
+            <h1 className="mt-1 font-display text-2xl font-bold text-slate-900 dark:text-slate-50">
+              Clinic path &ldquo;/{resolvedRoute.slug}&rdquo; not configured
+            </h1>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              Select a configured clinic portal path below, or add a clinic config
+              under <code className="font-mono text-xs">src/config/clinics/</code>.
+            </p>
+            <ul className="mt-5 divide-y divide-slate-200 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+              {configuredClinics.map((item) => (
+                <li key={item.slug}>
+                  <a
+                    href={item.path}
+                    className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+                        {item.name}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                        <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>{item.path}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{item.specialty}</span>
+                      </p>
+                    </div>
+                    <ArrowRight
+                      className="h-4 w-4 shrink-0 text-brand-text dark:text-brand-text-dark"
+                      aria-hidden="true"
+                    />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </main>
+        </div>
+        <Footer />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen w-full overflow-x-clip flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-teal-700 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-white focus:shadow-lg"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-brand-primary focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-brand-fg focus:shadow-lg"
       >
         Skip to main content
       </a>
@@ -381,15 +575,8 @@ export default function App() {
         patientKind={patientKind}
         upcomingCount={upcomingCount}
         activeSection={activeSection}
-        onNavigate={(section) => {
-          if (section === 'book') {
-            setBookingPreselect({});
-            setBookingSessionId((prev) => prev + 1);
-          }
-          setActiveSection(section);
-        }}
-        onStartBooking={() => handleStartBooking()}
-        onLogoutPatient={handleSignOutPatient}
+        onNavigate={handleNavigateRequest}
+        onLogoutPatient={handleLogoutRequest}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -397,7 +584,7 @@ export default function App() {
       <div
         aria-live="polite"
         aria-atomic="true"
-        className="pointer-events-none fixed bottom-4 right-4 z-40 w-[calc(100%-2rem)] max-w-md"
+        className="pointer-events-none fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-4 z-40 sm:w-[calc(100%-2rem)] max-w-md"
       >
         {announcement ? (
           <div className="pointer-events-auto flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-900 shadow-md dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
@@ -423,79 +610,115 @@ export default function App() {
       <main
         id="main-content"
         tabIndex={-1}
-        className="mx-auto w-full max-w-7xl flex-1 flex flex-col px-4 py-4 sm:px-6 lg:px-8 focus:outline-none"
+        className="mx-auto w-full min-w-0 max-w-7xl flex-1 flex flex-col overflow-hidden px-3 py-2.5 sm:px-6 sm:py-4 lg:px-8 focus:outline-none"
       >
-
         {!patient &&
         (activeSection === 'appointments' || activeSection === 'book') ? (
-          <PatientVerificationGate
-            clinic={clinic}
-            onPatientVerified={handlePatientVerified}
-          />
+          <Suspense fallback={<PatientVerificationSkeleton />}>
+            <PatientVerificationGate
+              clinic={clinic}
+              onPatientVerified={handlePatientVerified}
+            />
+          </Suspense>
         ) : null}
 
         {patient && activeSection === 'appointments' ? (
-          <AppointmentsView
-            clinic={clinic}
-            patientId={patient.id}
-            appointments={appointments}
-            loading={loadingAppointments}
-            error={appointmentsError}
-            onStartBooking={handleStartBooking}
-            onOpenReschedule={(appt) => setRescheduleTarget(appt)}
-            onOpenCancel={(appt) => setCancelTarget(appt)}
-            onRetryLoad={() => loadPatientAppointments(patient.id, clinic.id)}
-          />
+          <Suspense fallback={<AppointmentsViewSkeleton />}>
+            <AppointmentsView
+              clinic={clinic}
+              patientId={patient.id}
+              appointments={appointments}
+              loading={loadingAppointments}
+              error={appointmentsError}
+              onStartBooking={handleStartBooking}
+              onOpenReschedule={(appt) => setRescheduleTarget(appt)}
+              onOpenCancel={(appt) => setCancelTarget(appt)}
+              onRetryLoad={() => loadPatientAppointments(patient.id, clinic.id)}
+            />
+          </Suspense>
         ) : null}
 
         {patient && activeSection === 'book' ? (
-          <BookingWizard
-            key={`${clinic.id}-${bookingSessionId}`}
-            clinic={clinic}
-            providers={providers}
-            appointmentTypes={appointmentTypes}
-            patient={patient}
-            appointments={appointments}
-            initialAppointmentTypeId={bookingPreselect.appointmentTypeId}
-            onSubmitBooking={handleCreateAppointment}
-            onFinishToAppointments={() => setActiveSection('appointments')}
-          />
+          <Suspense fallback={<BookingWizardSkeleton />}>
+            <BookingWizard
+              key={`${clinic.id}-${bookingSessionId}`}
+              clinic={clinic}
+              providers={providers}
+              appointmentTypes={appointmentTypes}
+              patient={patient}
+              patientKind={patientKind}
+              appointments={appointments}
+              loading={loadingAppointments}
+              initialAppointmentTypeId={bookingPreselect.appointmentTypeId}
+              onSubmitBooking={handleCreateAppointment}
+              onFinishToAppointments={() => performSectionNavigation('appointments')}
+              onUnsavedProgressChange={setBookingHasUnsavedChanges}
+            />
+          </Suspense>
         ) : null}
 
         {activeSection === 'team' ? (
-          <CareTeamView clinic={clinic} providers={providers} />
+          <Suspense fallback={<CareTeamSkeleton />}>
+            <CareTeamView clinic={clinic} providers={providers} />
+          </Suspense>
         ) : null}
 
         {activeSection === 'clinic' ? (
-          <ClinicInfoView clinic={clinic} />
+          <Suspense fallback={<ClinicInfoSkeleton />}>
+            <ClinicInfoView clinic={clinic} />
+          </Suspense>
         ) : null}
       </main>
 
-      <RescheduleModal
-        appointment={rescheduleTarget}
-        clinic={clinic}
-        providers={providers}
-        appointments={appointments}
-        onClose={() => setRescheduleTarget(null)}
-        onConfirm={handleRescheduleConfirm}
-      />
+      <Footer />
 
-      <CancelModal
-        appointment={cancelTarget}
-        cancellationPolicyHours={clinic.cancellationPolicyHours}
-        cancellationReasons={clinic.cancellationReasons}
-        onClose={() => setCancelTarget(null)}
-        onConfirm={handleCancelConfirm}
-      />
+      <Suspense fallback={null}>
+        {rescheduleTarget ? (
+          <RescheduleModal
+            appointment={rescheduleTarget}
+            clinic={clinic}
+            providers={providers}
+            appointments={appointments}
+            onClose={() => setRescheduleTarget(null)}
+            onConfirm={handleRescheduleConfirm}
+          />
+        ) : null}
+
+        {cancelTarget ? (
+          <CancelModal
+            appointment={cancelTarget}
+            cancellationPolicyHours={clinic.cancellationPolicyHours}
+            cancellationReasons={clinic.cancellationReasons}
+            onClose={() => setCancelTarget(null)}
+            onConfirm={handleCancelConfirm}
+          />
+        ) : null}
+      </Suspense>
 
       <SessionTimeoutModal
         open={showTimeoutWarning}
         onStaySignedIn={async () => {
           await keepSessionAlive();
-          setLastActivityTime(Date.now());
+          lastActivityTimeRef.current = Date.now();
+          lastServerKeepAliveRef.current = Date.now();
           setShowTimeoutWarning(false);
         }}
         onSignOut={handleSignOutPatient}
+      />
+
+      <ConfirmLeaveBookingModal
+        open={Boolean(pendingLeaveAction)}
+        onStay={() => setPendingLeaveAction(null)}
+        onDiscard={() => {
+          const action = pendingLeaveAction;
+          setPendingLeaveAction(null);
+          if (!action) return;
+          if (action.type === 'logout') {
+            handleSignOutPatient();
+          } else {
+            performSectionNavigation(action.section);
+          }
+        }}
       />
     </div>
   );

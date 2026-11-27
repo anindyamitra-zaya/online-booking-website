@@ -38,18 +38,20 @@ export function PatientVerificationGate({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12 lg:items-stretch">
+    <div className="grid flex-1 min-w-0 gap-4 sm:gap-6 lg:grid-cols-12 lg:items-stretch">
       {/* Left Column: Full-Height Clinic Cover Banner with Contact Overlaid */}
       <section
         aria-label="Clinic overview and contact"
         data-testid="landing-clinic-banner"
-        className="relative flex min-h-[220px] sm:min-h-[260px] flex-col justify-end overflow-hidden rounded-xl border border-slate-200 lg:col-span-5 lg:min-h-[380px] lg:h-full dark:border-slate-800"
+        className="relative flex min-w-0 min-h-[200px] sm:min-h-[260px] flex-col justify-end overflow-hidden rounded-xl border border-slate-200 lg:col-span-5 lg:min-h-[380px] lg:h-full dark:border-slate-800"
       >
         <SafeImage
           src={clinic.bannerImage}
           alt={`${clinic.name} clinic reception`}
           fallbackType="clinic"
           fallbackLabel={clinic.name}
+          width={1200}
+          height={670}
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div
@@ -57,28 +59,28 @@ export function PatientVerificationGate({
           className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent"
         />
 
-        <div className="relative z-10 p-4 sm:p-7 text-white">
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-300">
+        <div className="relative z-10 min-w-0 p-4 sm:p-7 text-white">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-text-dark">
             {clinic.specialty}
           </p>
-          <h2 className="mt-1 font-display text-xl sm:text-2xl font-bold leading-snug text-balance">
+          <p className="mt-1 font-display text-xl sm:text-2xl font-bold leading-snug text-balance">
             {clinic.name}
-          </h2>
+          </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-100">
             <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
               <Phone
-                className="h-3.5 w-3.5 shrink-0 text-teal-300"
+                className="h-3.5 w-3.5 shrink-0 text-brand-text-dark"
                 aria-hidden="true"
               />
               <span>{clinic.phone}</span>
             </span>
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
               <Mail
-                className="h-3.5 w-3.5 shrink-0 text-teal-300"
+                className="h-3.5 w-3.5 shrink-0 text-brand-text-dark"
                 aria-hidden="true"
               />
-              <span>{clinic.supportEmail}</span>
+              <span className="break-all">{clinic.supportEmail}</span>
             </span>
           </div>
         </div>
@@ -88,11 +90,11 @@ export function PatientVerificationGate({
       <section
         aria-labelledby="patient-verify-heading"
         data-testid="landing-patient-card"
-        className="flex min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 sm:p-7 lg:col-span-7 lg:h-full dark:border-slate-800 dark:bg-slate-900"
+        className="flex min-w-0 flex-col justify-between rounded-xl border border-slate-200 bg-white p-3.5 sm:p-7 lg:col-span-7 lg:h-full dark:border-slate-800 dark:bg-slate-900"
       >
         <div>
           <div className="border-b border-slate-200 pb-4 dark:border-slate-800">
-            <p className="text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
+            <p className="text-xs font-semibold uppercase tracking-wide text-brand-text dark:text-brand-text-dark">
               Patient Portal
             </p>
             <h1
@@ -107,7 +109,12 @@ export function PatientVerificationGate({
             <PatientEntryForm
               idPrefix="gate"
               submitLabel="Continue"
-              samplePatients={clinic.samplePatients}
+              samplePatients={
+                import.meta.env.DEV ||
+                import.meta.env.VITE_SHOW_SAMPLE_PATIENTS === 'true'
+                  ? clinic.samplePatients
+                  : undefined
+              }
               onPatientReady={onPatientVerified}
               onPhoneVerifiedForRegistration={(seed) =>
                 setRegistrationSeed(seed)

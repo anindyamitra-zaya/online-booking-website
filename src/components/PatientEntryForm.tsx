@@ -13,9 +13,11 @@ import {
   verifyPhoneVerificationCode,
 } from '../services/clinicApi';
 import {
+  combineFullName,
   formatDateLabel,
   formatResendLabel,
   parseMmDdYyyyToIso,
+  splitFullName,
   validatePatientLookup,
   validatePhoneNumber,
   validateVerificationCode,
@@ -48,7 +50,8 @@ export function PatientEntryForm({
 }: PatientEntryFormProps) {
   const quickSamples = samplePatients ?? [];
   const [stage, setStage] = useState<'lookup' | 'verify-phone'>('lookup');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
 
   // Phone verification state
@@ -77,14 +80,28 @@ export function PatientEntryForm({
   const [recaptchaToken, setRecaptchaToken] = useState('');
   const [recaptchaResetSignal, setRecaptchaResetSignal] = useState(0);
 
+  const fullName = combineFullName(firstName, lastName);
+
   const handleLookupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validatePatientLookup(fullName, dateOfBirth);
+    const validation = validatePatientLookup(firstName, lastName, dateOfBirth);
     if (!recaptchaToken) {
       validation.recaptcha = 'Please complete the reCAPTCHA verification.';
     }
     if (Object.keys(validation).length > 0) {
       setErrors(validation);
+      const firstErrorTarget = validation.firstName
+        ? document.getElementById(`${idPrefix}-first-name`)
+        : validation.lastName
+          ? document.getElementById(`${idPrefix}-last-name`)
+          : validation.dateOfBirth
+            ? document.getElementById(`${idPrefix}-dob`)
+            : validation.recaptcha
+              ? (document.querySelector('[data-testid="recaptcha-checkbox-button"]') as HTMLElement | null)
+              : null;
+      if (firstErrorTarget) {
+        window.requestAnimationFrame(() => firstErrorTarget.focus());
+      }
       return;
     }
 
@@ -95,7 +112,9 @@ export function PatientEntryForm({
       const normalizedDob =
         parseMmDdYyyyToIso(dateOfBirth.trim()) || dateOfBirth.trim();
       const result = await lookupPatient({
-        fullName: fullName.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        fullName,
         dateOfBirth: normalizedDob,
         recaptchaToken,
       });
@@ -164,6 +183,12 @@ export function PatientEntryForm({
         ...(phoneErr ? { phone: phoneErr } : {}),
         ...(codeErr ? { verificationCode: codeErr } : {}),
       });
+      const focusId = phoneErr
+        ? `${idPrefix}-verify-phone`
+        : `${idPrefix}-verify-code`;
+      window.requestAnimationFrame(() =>
+        document.getElementById(focusId)?.focus()
+      );
       return;
     }
 
@@ -176,7 +201,9 @@ export function PatientEntryForm({
         code: verificationCode.trim(),
       });
       onPhoneVerifiedForRegistration({
-        fullName: fullName.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        fullName,
         dateOfBirth: dateOfBirth.trim(),
         phone: phone.trim(),
         phoneVerificationToken: res.verificationToken,
@@ -193,8 +220,10 @@ export function PatientEntryForm({
   };
 
   const handleFillSample = (sample: ClinicSamplePatient) => {
+    const split = splitFullName(sample.fullName);
     setStage('lookup');
-    setFullName(sample.fullName);
+    setFirstName(sample.firstName || split.firstName);
+    setLastName(sample.lastName || split.lastName);
     setDateOfBirth(sample.dateOfBirth);
     setPhone('');
     setCodeSent(false);
@@ -210,22 +239,22 @@ export function PatientEntryForm({
     return (
       <form
         onSubmit={handleVerifyCodeSubmit}
-        className="space-y-4"
+        className="min-w-0 space-y-4"
         noValidate
       >
         <div
           role="status"
-          className="flex items-start gap-3 rounded-lg border border-teal-200 bg-teal-50/70 px-4 py-3 text-sm text-teal-950 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-100"
+          className="flex min-w-0 items-start gap-3 rounded-lg border border-brand-soft-border bg-brand-soft-bg px-4 py-3 text-sm text-slate-900 dark:border-brand-soft-border-dark dark:bg-brand-soft-bg-dark dark:text-slate-100"
         >
           <ShieldCheck
-            className="mt-0.5 h-4 w-4 shrink-0 text-teal-700 dark:text-teal-300"
+            className="mt-0.5 h-4 w-4 shrink-0 text-brand-text dark:text-brand-text-dark"
             aria-hidden="true"
           />
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold text-xs">Verify Phone Number</p>
-            <p className="mt-0.5 text-xs text-teal-900/90 dark:text-teal-200/90">
+            <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-200">
               No existing record found for{' '}
-              <span className="font-semibold">{fullName.trim()}</span> (
+              <span className="font-semibold">{fullName}</span> (
               <span className="font-mono tabular-nums">
                 {formatDateLabel(dateOfBirth.trim())}
               </span>
@@ -255,7 +284,7 @@ export function PatientEntryForm({
                   setErrors({});
                   setServerError('');
                 }}
-                className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+                className="text-xs font-semibold text-brand-text hover:underline dark:text-brand-text-dark"
               >
                 Change number
               </button>
@@ -320,7 +349,7 @@ export function PatientEntryForm({
                 className={`font-mono text-xs font-semibold tabular-nums transition-colors ${
                   resendDisabled
                     ? 'cursor-not-allowed text-slate-400 dark:text-slate-500'
-                    : 'text-teal-700 hover:underline dark:text-teal-300'
+                    : 'text-brand-text hover:underline dark:text-brand-text-dark'
                 }`}
               >
                 {formatResendLabel(resendCountdown, sendingCode)}
@@ -388,7 +417,7 @@ export function PatientEntryForm({
           </p>
         ) : null}
 
-        <div className="flex flex-nowrap items-center justify-between gap-2 sm:gap-3 pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 pt-1">
           <button
             type="button"
             disabled={submitting || sendingCode}
@@ -409,7 +438,7 @@ export function PatientEntryForm({
               type="submit"
               disabled={sendingCode}
               aria-busy={sendingCode}
-              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-brand-primary px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-60 whitespace-nowrap shrink-0 min-h-[40px]"
             >
               {sendingCode ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
@@ -432,7 +461,7 @@ export function PatientEntryForm({
               type="submit"
               disabled={submitting}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-brand-primary px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-60 whitespace-nowrap shrink-0 min-h-[40px]"
             >
               {submitting ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
@@ -457,44 +486,84 @@ export function PatientEntryForm({
   }
 
   return (
-    <form onSubmit={handleLookupSubmit} className="space-y-4" noValidate>
-      <div className="space-y-3.5">
-        <div>
-          <label
-            htmlFor={`${idPrefix}-full-name`}
-            className="block text-sm font-medium text-slate-800 dark:text-slate-200"
-          >
-            Full Name
-          </label>
-          <input
-            id={`${idPrefix}-full-name`}
-            type="text"
-            autoComplete="name"
-            value={fullName}
-            onChange={(e) => {
-              setFullName(e.target.value);
-              if (errors.fullName) {
-                setErrors((prev) => ({ ...prev, fullName: '' }));
-              }
-            }}
-            disabled={submitting}
-            aria-required="true"
-            aria-invalid={Boolean(errors.fullName)}
-            aria-describedby={
-              errors.fullName ? `${idPrefix}-name-err` : undefined
-            }
-            placeholder="e.g. Elena Vance"
-            className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 min-h-[42px]"
-          />
-          {errors.fullName ? (
-            <p
-              id={`${idPrefix}-name-err`}
-              role="alert"
-              className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
+    <form onSubmit={handleLookupSubmit} className="min-w-0 space-y-4" noValidate>
+      <div className="min-w-0 space-y-3.5">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="min-w-0">
+            <label
+              htmlFor={`${idPrefix}-first-name`}
+              className="block text-sm font-medium text-slate-800 dark:text-slate-200"
             >
-              {errors.fullName}
-            </p>
-          ) : null}
+              First Name
+            </label>
+            <input
+              id={`${idPrefix}-first-name`}
+              type="text"
+              autoComplete="given-name"
+              value={firstName}
+              onChange={(e) => {
+                setFirstName(e.target.value);
+                if (errors.firstName) {
+                  setErrors((prev) => ({ ...prev, firstName: '' }));
+                }
+              }}
+              disabled={submitting}
+              aria-required="true"
+              aria-invalid={Boolean(errors.firstName)}
+              aria-describedby={
+                errors.firstName ? `${idPrefix}-first-name-err` : undefined
+              }
+              placeholder="e.g. Elena"
+              className="mt-1.5 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400 min-h-[42px]"
+            />
+            {errors.firstName ? (
+              <p
+                id={`${idPrefix}-first-name-err`}
+                role="alert"
+                className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
+              >
+                {errors.firstName}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="min-w-0">
+            <label
+              htmlFor={`${idPrefix}-last-name`}
+              className="block text-sm font-medium text-slate-800 dark:text-slate-200"
+            >
+              Last Name
+            </label>
+            <input
+              id={`${idPrefix}-last-name`}
+              type="text"
+              autoComplete="family-name"
+              value={lastName}
+              onChange={(e) => {
+                setLastName(e.target.value);
+                if (errors.lastName) {
+                  setErrors((prev) => ({ ...prev, lastName: '' }));
+                }
+              }}
+              disabled={submitting}
+              aria-required="true"
+              aria-invalid={Boolean(errors.lastName)}
+              aria-describedby={
+                errors.lastName ? `${idPrefix}-last-name-err` : undefined
+              }
+              placeholder="e.g. Vance"
+              className="mt-1.5 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400 min-h-[42px]"
+            />
+            {errors.lastName ? (
+              <p
+                id={`${idPrefix}-last-name-err`}
+                role="alert"
+                className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
+              >
+                {errors.lastName}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div>
@@ -556,7 +625,7 @@ export function PatientEntryForm({
 
       <div className="pt-1">
         {onCancel ? (
-          <div className="flex flex-nowrap items-center justify-between gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <button
               type="button"
               onClick={onCancel}
@@ -569,7 +638,7 @@ export function PatientEntryForm({
               type="submit"
               disabled={submitting}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-xs sm:px-5 sm:py-2.5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-xs sm:px-5 sm:py-2.5 sm:text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-60 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[44px]"
             >
               {submitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -584,7 +653,7 @@ export function PatientEntryForm({
             type="submit"
             disabled={submitting}
             aria-busy={submitting}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 min-h-[42px] sm:min-h-[44px]"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-5 py-2.5 text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-60 min-h-[42px] sm:min-h-[44px]"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

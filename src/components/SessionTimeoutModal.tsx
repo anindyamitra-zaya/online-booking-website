@@ -1,4 +1,6 @@
+import { useRef } from 'react';
 import { AlertCircle } from 'lucide-react';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 
 interface SessionTimeoutModalProps {
   open: boolean;
@@ -11,16 +13,23 @@ export function SessionTimeoutModal({
   onStaySignedIn,
   onSignOut,
 }: SessionTimeoutModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useDialogAccessibility(open, dialogRef, onStaySignedIn);
+
   if (!open) return null;
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="session-timeout-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-fade-in"
     >
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-timeout-title"
+        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl focus:outline-none dark:border-slate-800 dark:bg-slate-900"
+      >
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400">
             <AlertCircle className="h-5 w-5" aria-hidden="true" />
@@ -38,7 +47,7 @@ export function SessionTimeoutModal({
           </div>
         </div>
 
-        <div className="mt-6 flex flex-nowrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <button
             type="button"
             onClick={onSignOut}
@@ -49,7 +58,7 @@ export function SessionTimeoutModal({
           <button
             type="button"
             onClick={onStaySignedIn}
-            className="rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400"
+            className="rounded-lg bg-brand-primary px-5 py-2.5 text-sm font-semibold text-brand-fg hover:bg-brand-hover"
           >
             Stay Signed In
           </button>

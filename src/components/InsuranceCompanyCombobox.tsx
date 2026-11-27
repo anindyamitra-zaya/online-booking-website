@@ -165,7 +165,7 @@ export function InsuranceCompanyCombobox({
         <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
           {loading ? (
             <Loader2
-              className="mr-1 h-3.5 w-3.5 animate-spin text-teal-700 dark:text-teal-400"
+              className="mr-1 h-3.5 w-3.5 animate-spin text-brand-text dark:text-brand-text-dark"
               aria-hidden="true"
             />
           ) : null}
@@ -199,7 +199,7 @@ export function InsuranceCompanyCombobox({
           >
             <ChevronDown
               className={`h-3.5 w-3.5 transition-transform ${
-                isOpen ? 'rotate-180 text-teal-700 dark:text-teal-400' : ''
+                isOpen ? 'rotate-180 text-brand-text dark:text-brand-text-dark' : ''
               }`}
               aria-hidden="true"
             />
@@ -247,7 +247,7 @@ export function InsuranceCompanyCombobox({
                     onMouseEnter={() => setActiveIndex(idx)}
                     className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
                       isSelected
-                        ? 'bg-teal-50 font-semibold text-teal-900 dark:bg-teal-950/70 dark:text-teal-100'
+                        ? 'bg-brand-soft-bg font-semibold text-brand-text dark:bg-brand-soft-bg-dark dark:text-brand-text-dark'
                         : isActive
                           ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
                           : 'text-slate-800 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60'
@@ -256,7 +256,7 @@ export function InsuranceCompanyCombobox({
                     <span className="min-w-0 flex-1 truncate">{company}</span>
                     {isSelected ? (
                       <Check
-                        className="h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-300"
+                        className="h-3.5 w-3.5 shrink-0 text-brand-text dark:text-brand-text-dark"
                         aria-hidden="true"
                       />
                     ) : null}

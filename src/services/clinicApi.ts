@@ -38,6 +38,23 @@ export function setSessionToken(token: string | null) {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+let onSessionExpiredHandler: ((message: string) => void) | null = null;
+
+export function setOnSessionExpiredHandler(
+  handler: ((message: string) => void) | null
+) {
+  onSessionExpiredHandler = handler;
+}
+
 export function getSessionToken(): string | null {
   return currentSessionToken;
 }
@@ -99,13 +116,14 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const errorMessage =
+      (data as { error?: string }).error ||
+      `Request failed (${response.status})`;
     if (response.status === 401) {
       setSessionToken(null);
+      onSessionExpiredHandler?.(errorMessage);
     }
-    throw new Error(
-      (data as { error?: string }).error ||
-        `Request failed (${response.status})`
-    );
+    throw new ApiError(errorMessage, response.status);
   }
   return data as T;
 }
@@ -151,6 +169,8 @@ export async function fetchPatientById(
 }
 
 export async function lookupPatient(payload: {
+  firstName?: string;
+  lastName?: string;
   fullName: string;
   dateOfBirth: string;
   phone?: string;
@@ -227,6 +247,8 @@ export async function verifyPhoneVerificationCode(payload: {
 
 export async function registerPatient(
   payload: {
+    firstName?: string;
+    lastName?: string;
     fullName: string;
     dateOfBirth: string;
     phone: string;

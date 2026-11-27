@@ -113,13 +113,13 @@ export function SegmentedDateInput({
   const isoValue = parseMmDdYyyyToIso(value) || '';
 
   return (
-    <div className="mt-1.5 flex items-center gap-2.5">
+    <div className="mt-1.5 flex min-w-0 items-center gap-2 sm:gap-2.5">
       <div
         data-testid={`${id}-segmented-box`}
-        className={`flex flex-1 items-center rounded-lg border bg-white px-3 min-h-[44px] transition-colors focus-within:ring-2 dark:bg-slate-950 ${
+        className={`flex min-w-0 flex-1 items-center rounded-lg border bg-white px-2 sm:px-3 min-h-[44px] transition-colors focus-within:ring-2 dark:bg-slate-950 ${
           invalid
             ? 'border-rose-500 focus-within:border-rose-600 focus-within:ring-rose-500/20 dark:border-rose-500'
-            : 'border-slate-300 focus-within:border-teal-700 focus-within:ring-teal-700/15 dark:border-slate-700 dark:focus-within:border-teal-400 dark:focus-within:ring-teal-400/15'
+            : 'border-slate-300 focus-within:border-brand-primary focus-within:ring-brand-ring dark:border-slate-700 dark:focus-within:border-brand-primary'
         } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <input
@@ -151,7 +151,7 @@ export function SegmentedDateInput({
               ddRef.current?.select();
             }
           }}
-          className="w-1/4 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+          className="w-1/4 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-400"
         />
 
         <span
@@ -173,6 +173,7 @@ export function SegmentedDateInput({
           aria-label="Birth day (DD)"
           aria-required="true"
           aria-invalid={invalid}
+          aria-describedby={describedBy}
           placeholder="DD"
           onKeyDown={(e) => {
             if (e.key === 'Backspace' && !dd) {
@@ -195,7 +196,7 @@ export function SegmentedDateInput({
               yyyyRef.current?.select();
             }
           }}
-          className="w-1/4 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+          className="w-1/4 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-400"
         />
 
         <span
@@ -217,6 +218,7 @@ export function SegmentedDateInput({
           aria-label="Birth year (YYYY)"
           aria-required="true"
           aria-invalid={invalid}
+          aria-describedby={describedBy}
           placeholder="YYYY"
           onKeyDown={(e) => {
             if (e.key === 'Backspace' && !yyyy) {
@@ -235,12 +237,12 @@ export function SegmentedDateInput({
             setYyyy(digits);
             emitCombined(mm, dd, digits);
           }}
-          className="w-2/5 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-500"
+          className="w-2/5 min-w-0 bg-transparent text-center font-mono text-sm tracking-wide text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder:text-slate-400"
         />
       </div>
 
       <div
-        className={`relative flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-lg border bg-white text-teal-700 transition-colors hover:bg-slate-50 dark:bg-slate-950 dark:text-teal-400 dark:hover:bg-slate-900 ${
+        className={`relative flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-lg border bg-white text-brand-text transition-colors hover:bg-slate-50 focus-within:ring-2 focus-within:ring-brand-ring focus-within:border-brand-primary dark:bg-slate-950 dark:text-brand-text-dark dark:hover:bg-slate-900 ${
           invalid
             ? 'border-rose-500 dark:border-rose-500'
             : 'border-slate-300 dark:border-slate-700'
@@ -250,7 +252,7 @@ export function SegmentedDateInput({
         <input
           ref={pickerRef}
           type="date"
-          tabIndex={-1}
+          tabIndex={disabled ? -1 : 0}
           aria-label="Open date of birth calendar picker"
           value={isoValue}
           disabled={disabled}

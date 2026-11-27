@@ -9,13 +9,17 @@ import { DEFAULT_INSURANCE_COMPANIES } from '../data/insuranceCompanies';
 import { US_LANGUAGES } from '../data/usLanguages';
 import { US_STATES } from '../data/usStates';
 import {
+  combineFullName,
   formatDateLabel,
+  splitFullName,
   validatePatientRegistration,
 } from '../utils/appointments';
 import { InsuranceCompanyCombobox } from './InsuranceCompanyCombobox';
 import { ThemedSelect } from './ThemedSelect';
 
 export interface VerifiedRegistrationSeed {
+  firstName?: string;
+  lastName?: string;
   fullName: string;
   dateOfBirth: string;
   phone: string;
@@ -38,7 +42,11 @@ export function NewPatientRegistrationPage({
   onRegistered,
   onBack,
 }: NewPatientRegistrationPageProps) {
-  const [age, setAge] = useState('');
+  const split = splitFullName(seed.fullName);
+  const firstName = (seed.firstName ?? split.firstName).trim();
+  const lastName = (seed.lastName ?? split.lastName).trim();
+  const combinedFullName = combineFullName(firstName, lastName) || seed.fullName.trim();
+
   const [sex, setSex] = useState('');
   const [preferredLanguage, setPreferredLanguage] = useState('');
   const [street, setStreet] = useState('');
@@ -56,9 +64,6 @@ export function NewPatientRegistrationPage({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
-  const [recaptchaToken, setRecaptchaToken] = useState('');
-  const [recaptchaError, setRecaptchaError] = useState('');
-  const [recaptchaResetSignal, setRecaptchaResetSignal] = useState(0);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -95,10 +100,11 @@ export function NewPatientRegistrationPage({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const validation = validatePatientRegistration({
-      fullName: seed.fullName,
+      firstName,
+      lastName,
+      fullName: combinedFullName,
       dateOfBirth: seed.dateOfBirth,
       phone: seed.phone,
-      age,
       sex,
       preferredLanguage,
       street,
@@ -111,6 +117,28 @@ export function NewPatientRegistrationPage({
     });
     if (Object.keys(validation).length > 0) {
       setErrors(validation);
+      const firstId = validation.sex
+        ? 'reg-page-sex'
+        : validation.preferredLanguage
+          ? 'reg-page-language'
+          : validation.address
+            ? !street.trim()
+              ? 'reg-page-street'
+              : !city.trim()
+                ? 'reg-page-city'
+                : !stateVal.trim()
+                  ? 'reg-page-state'
+                  : 'reg-page-pin'
+            : validation.insuranceProvider
+              ? 'reg-page-ins-company'
+              : validation.insuranceMemberId
+                ? 'reg-page-ins-member'
+                : null;
+      if (firstId) {
+        window.requestAnimationFrame(() =>
+          document.getElementById(firstId)?.focus()
+        );
+      }
       return;
     }
 
@@ -119,7 +147,9 @@ export function NewPatientRegistrationPage({
     setSubmitting(true);
     try {
       const created = await registerPatient({
-        fullName: seed.fullName.trim(),
+        firstName,
+        lastName,
+        fullName: combinedFullName,
         dateOfBirth: seed.dateOfBirth.trim(),
         phone: seed.phone.trim(),
         phoneVerificationToken: seed.phoneVerificationToken,
@@ -147,43 +177,60 @@ export function NewPatientRegistrationPage({
   };
 
   return (
-    <div className="w-full pb-8">
+    <div className="flex flex-1 flex-col w-full min-w-0">
       <section
         aria-labelledby="reg-page-heading"
         data-testid="registration-page-card"
-        className="w-full rounded-xl border border-slate-200 bg-white p-4 sm:p-7 dark:border-slate-800 dark:bg-slate-900"
+        className="flex flex-1 flex-col justify-between w-full min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-3.5 sm:p-7 dark:border-slate-800 dark:bg-slate-900"
       >
-        <div className="border-b border-slate-200 pb-4 dark:border-slate-800">
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
-            {clinic.shortName} · New Patient Onboarding
-          </p>
+        <div className="border-b border-slate-200 pb-3.5 sm:pb-4 dark:border-slate-800">
           <h1
             id="reg-page-heading"
-            className="mt-1 font-display text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50"
+            className="font-display text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50"
           >
             New Patient Registration
           </h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-5" noValidate>
-          <div className="grid gap-4 sm:grid-cols-3">
+        <form onSubmit={handleSubmit} className="mt-4 sm:mt-5 flex flex-1 flex-col justify-between min-w-0 gap-5" noValidate>
+          <div className="min-w-0 space-y-4 sm:space-y-5">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
             <div className="min-w-0">
               <label
-                htmlFor="reg-page-full-name"
+                htmlFor="reg-page-first-name"
                 className="block text-xs font-medium text-slate-800 dark:text-slate-200"
               >
-                Full Name
+                First Name
               </label>
               <input
-                id="reg-page-full-name"
+                id="reg-page-first-name"
                 type="text"
-                value={seed.fullName}
+                value={firstName}
                 disabled
                 readOnly
-                className="mt-1.5 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 h-[44px]"
+                className="mt-1.5 w-full min-w-0 cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 h-[44px]"
               />
             </div>
 
+            <div className="min-w-0">
+              <label
+                htmlFor="reg-page-last-name"
+                className="block text-xs font-medium text-slate-800 dark:text-slate-200"
+              >
+                Last Name
+              </label>
+              <input
+                id="reg-page-last-name"
+                type="text"
+                value={lastName}
+                disabled
+                readOnly
+                className="mt-1.5 w-full min-w-0 cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 h-[44px]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
             <div className="min-w-0">
               <label
                 htmlFor="reg-page-dob"
@@ -225,43 +272,7 @@ export function NewPatientRegistrationPage({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-            <div className="min-w-0">
-              <label
-                htmlFor="reg-page-age"
-                className="block text-xs font-medium text-slate-800 dark:text-slate-200"
-              >
-                Age
-              </label>
-              <input
-                id="reg-page-age"
-                type="number"
-                min="0"
-                max="120"
-                value={age}
-                onChange={(e) => {
-                  setAge(e.target.value);
-                  if (errors.age) {
-                    setErrors((prev) => ({ ...prev, age: '' }));
-                  }
-                }}
-                disabled={submitting}
-                aria-required="true"
-                aria-invalid={Boolean(errors.age)}
-                aria-describedby={errors.age ? 'reg-page-age-err' : undefined}
-                placeholder="e.g. 36"
-                className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
-              />
-              {errors.age ? (
-                <p
-                  id="reg-page-age-err"
-                  role="alert"
-                  className="mt-1 text-xs font-medium text-rose-700 dark:text-rose-400"
-                >
-                  {errors.age}
-                </p>
-              ) : null}
-            </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
 
             <div className="min-w-0">
               <label
@@ -307,7 +318,7 @@ export function NewPatientRegistrationPage({
               ) : null}
             </div>
 
-            <div className="col-span-2 min-w-0 sm:col-span-1">
+            <div className="min-w-0">
               <label
                 id="reg-page-language-label"
                 onClick={() =>
@@ -352,7 +363,7 @@ export function NewPatientRegistrationPage({
             </div>
           </div>
 
-          <fieldset className="min-w-0 space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+          <fieldset className="w-full max-w-full min-w-0 space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 sm:p-4 dark:border-slate-800 dark:bg-slate-950/40">
             <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">
               Home Address
             </legend>
@@ -378,12 +389,12 @@ export function NewPatientRegistrationPage({
                 disabled={submitting}
                 aria-required="true"
                 placeholder="e.g. 100 Main St"
-                className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
+                className="mt-1.5 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <div className="col-span-2 min-w-0 sm:col-span-1">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="min-w-0">
                 <label
                   htmlFor="reg-page-city"
                   className="block text-xs font-medium text-slate-700 dark:text-slate-300"
@@ -404,7 +415,7 @@ export function NewPatientRegistrationPage({
                   disabled={submitting}
                   aria-required="true"
                   placeholder="Austin"
-                  className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
+                  className="mt-1.5 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
                 />
               </div>
 
@@ -461,7 +472,7 @@ export function NewPatientRegistrationPage({
                   disabled={submitting}
                   aria-required="true"
                   placeholder="78756"
-                  className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
+                  className="mt-1.5 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 h-[44px]"
                 />
               </div>
             </div>
@@ -487,7 +498,7 @@ export function NewPatientRegistrationPage({
                 aria-pressed={paymentType === 'insurance'}
                 className={`rounded-lg border px-3 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm font-semibold transition-colors h-[42px] sm:h-[44px] ${
                   paymentType === 'insurance'
-                    ? 'border-teal-700 bg-teal-50 text-teal-900 dark:border-teal-400 dark:bg-teal-950/60 dark:text-teal-100'
+                    ? 'border-brand-primary bg-brand-soft-bg text-brand-text dark:border-brand-soft-border-dark dark:bg-brand-soft-bg-dark dark:text-brand-text-dark'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
                 }`}
               >
@@ -506,7 +517,7 @@ export function NewPatientRegistrationPage({
                 aria-pressed={paymentType === 'self-pay'}
                 className={`rounded-lg border px-3 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm font-semibold transition-colors h-[42px] sm:h-[44px] ${
                   paymentType === 'self-pay'
-                    ? 'border-teal-700 bg-teal-50 text-teal-900 dark:border-teal-400 dark:bg-teal-950/60 dark:text-teal-100'
+                    ? 'border-brand-primary bg-brand-soft-bg text-brand-text dark:border-brand-soft-border-dark dark:bg-brand-soft-bg-dark dark:text-brand-text-dark'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
                 }`}
               >
@@ -516,7 +527,7 @@ export function NewPatientRegistrationPage({
           </div>
 
           {paymentType === 'insurance' ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <InsuranceCompanyCombobox
                 id="reg-page-ins-company"
                 label="Insurance Company"
@@ -583,12 +594,11 @@ export function NewPatientRegistrationPage({
               {serverError}
             </p>
           ) : null}
-
-
+          </div>
 
           <div
             data-testid="registration-footer"
-            className="flex flex-nowrap items-center justify-between gap-2 sm:gap-3 border-t border-slate-200 pt-4 sm:pt-5 dark:border-slate-800"
+            className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 border-t border-slate-200 pt-4 sm:pt-5 dark:border-slate-800"
           >
             <button
               type="button"
@@ -604,7 +614,7 @@ export function NewPatientRegistrationPage({
               type="submit"
               disabled={submitting}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-4 py-2 text-xs sm:px-6 sm:py-2.5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[42px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-brand-primary px-4 py-2 text-xs sm:px-6 sm:py-2.5 sm:text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-60 whitespace-nowrap shrink-0 min-h-[40px] sm:min-h-[42px]"
             >
               {submitting ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />

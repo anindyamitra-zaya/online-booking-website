@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   Loader2,
   Lock,
@@ -19,7 +17,8 @@ import type {
 } from '../types/clinic';
 import { fetchAvailability } from '../services/clinicApi';
 import {
-  formatDateLabel,
+  formatDateWithWeekday,
+  formatLocationFullAddress,
   formatTime12h,
   generateAvailableSlots,
   getAvailableMonths,
@@ -32,6 +31,8 @@ import {
   toggleVisitReason,
 } from '../utils/appointments';
 import { REFERENCE_TODAY_ISO } from '../data/seedClinicData';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
+import { CalendarSlotPicker } from './CalendarSlotPicker';
 import { ThemedSelect } from './ThemedSelect';
 
 interface RescheduleModalProps {
@@ -52,8 +53,6 @@ interface RescheduleModalProps {
     }
   ) => Promise<void>;
 }
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 export function RescheduleModal({
   appointment,
@@ -83,6 +82,9 @@ export function RescheduleModal({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useDialogAccessibility(Boolean(appointment), dialogRef, onClose, submitting);
 
   const { lockProvider, lockLocation } = getReschedulePolicy(clinic);
 
@@ -165,17 +167,6 @@ export function RescheduleModal({
   }, [appointment, clinic.locations]);
 
   useEffect(() => {
-    if (!appointment) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [appointment, onClose, submitting]);
-
-  useEffect(() => {
     if (!appointment || !selectedDate || !selectedProviderId) return;
     let cancelled = false;
     setLoadingSlots(true);
@@ -212,65 +203,58 @@ export function RescheduleModal({
 
   if (!appointment) return null;
 
-  const morningSlots = slots.filter(
-    (s) => s.period === 'morning' && s.available
-  );
-  const afternoonSlots = slots.filter(
-    (s) => s.period === 'afternoon' && s.available
-  );
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedDate || !selectedTime24) {
-      setErrorMessage(
-        'Please select both a new date and an available time slot.'
-      );
-      return;
-    }
-    if (!reasonForVisit.trim()) {
-      setErrorMessage('Please provide a reason for your visit.');
+      setErrorMessage('Please select a new date and time slot.');
       return;
     }
 
     setSubmitting(true);
     setErrorMessage('');
-    const targets = resolveRescheduleTargets(clinic, appointment, {
-      providerId: selectedProviderId,
-      locationId: selectedLocationId,
-    });
     try {
+      const targets = resolveRescheduleTargets(clinic, appointment, {
+        providerId: selectedProviderId,
+        locationId: selectedLocationId,
+      });
       await onConfirm(appointment.id, {
         date: selectedDate,
         time24: selectedTime24,
         providerId: targets.providerId,
         locationId: targets.locationId,
         visitMode: 'in-person',
-        reasonForVisit: reasonForVisit.trim(),
+        reasonForVisit: reasonForVisit.trim() || appointment.reasonForVisit,
       });
       onClose();
     } catch (err) {
       setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : 'Could not reschedule appointment. Please try another slot.'
+        err instanceof Error ? err.message : 'Unable to reschedule appointment.'
       );
     } finally {
       setSubmitting(false);
     }
   };
 
+  const matchedLocation = clinic.locations.find(
+    (l) => l.id === appointment.locationId
+  );
+  const currentFullAddress =
+    appointment.locationAddress || formatLocationFullAddress(matchedLocation);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-4 backdrop-blur-xs"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !submitting) onClose();
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="reschedule-dialog-title"
-        className="w-full max-w-5xl min-h-[580px] sm:min-h-[640px] max-h-[92vh] flex flex-col justify-between overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="w-full max-w-5xl min-w-0 max-h-[90dvh] flex flex-col justify-between overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl focus:outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-3.5 sm:px-6 sm:py-4 dark:border-slate-800">
           <div>
@@ -294,40 +278,45 @@ export function RescheduleModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-3.5 sm:px-6 sm:py-4">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4 px-4 py-3.5 sm:px-6 sm:py-4">
           {/* Current appointment summary */}
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Current Scheduled Time
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-slate-800 dark:text-slate-200">
               <span className="inline-flex items-center gap-1.5 font-medium">
                 <Calendar
-                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  className="h-4 w-4 text-brand-text dark:text-brand-text-dark shrink-0"
                   aria-hidden="true"
                 />
-                <span>{formatDateLabel(appointment.date)}</span>
+                <span>{formatDateWithWeekday(appointment.date)}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
                 <Clock
-                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  className="h-4 w-4 text-brand-text dark:text-brand-text-dark shrink-0"
                   aria-hidden="true"
                 />
                 <span>{formatTime12h(appointment.time24)}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
                 <User
-                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  className="h-4 w-4 text-brand-text dark:text-brand-text-dark shrink-0"
                   aria-hidden="true"
                 />
                 <span>{appointment.providerName}</span>
               </span>
-              <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+              <span className="inline-flex min-w-0 items-start gap-1.5 text-slate-600 dark:text-slate-400">
                 <MapPin
-                  className="h-4 w-4 text-teal-700 dark:text-teal-400 shrink-0"
+                  className="mt-0.5 h-4 w-4 text-brand-text dark:text-brand-text-dark shrink-0"
                   aria-hidden="true"
                 />
-                <span>{appointment.locationName}</span>
+                <span className="min-w-0 break-words">
+                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                    {appointment.locationName}
+                  </span>
+                  {currentFullAddress ? ` — ${currentFullAddress}` : ''}
+                </span>
               </span>
             </div>
           </div>
@@ -406,196 +395,39 @@ export function RescheduleModal({
           </div>
 
           {/* 1-Month Calendar (Left) + Time Slots (Right) */}
-          <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
-            <div className="lg:col-span-7">
-              <div className="flex items-center justify-between gap-2 pb-2">
-                <span className="font-display text-sm font-semibold text-slate-900 dark:text-slate-50">
-                  {activeMonth.label}
-                </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    disabled={monthIndex === 0}
-                    onClick={() => handleMonthNavigate(monthIndex - 1)}
-                    aria-label="Previous month"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={monthIndex >= availableMonths.length - 1}
-                    onClick={() => handleMonthNavigate(monthIndex + 1)}
-                    aria-label="Next month"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2 dark:border-slate-800 dark:bg-slate-950/40">
-                <div className="grid grid-cols-7 gap-1 pb-1 text-center">
-                  {WEEKDAYS.map((day) => (
-                    <span
-                      key={day}
-                      className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                    >
-                      {day}
-                    </span>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7 gap-1">
-                  {monthCells.map((cell, idx) => {
-                    if (!cell.inCurrentMonth || !cell.dateIso || !cell.dayNumber) {
-                      return (
-                        <div
-                          key={`empty-${idx}`}
-                          aria-hidden="true"
-                          className="min-h-[40px]"
-                        />
-                      );
-                    }
-                    const dateIso = cell.dateIso;
-                    const count = cell.inWindow ? getDateSlotCount(dateIso) : 0;
-                    const isDisabled = !cell.inWindow || count === 0;
-                    const isSelected = selectedDate === dateIso;
-
-                    return (
-                      <button
-                        key={dateIso}
-                        type="button"
-                        disabled={isDisabled}
-                        onClick={() => {
-                          if (!isDisabled) {
-                            setSelectedDate(dateIso);
-                            setSelectedTime24('');
-                          }
-                        }}
-                        aria-pressed={isSelected}
-                        className={`flex flex-col items-center justify-center rounded-lg border px-1 py-1 text-center transition-colors min-h-[40px] ${
-                          isDisabled
-                            ? 'cursor-not-allowed border-transparent bg-transparent text-slate-300 dark:text-slate-700'
-                            : isSelected
-                              ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
-                              : 'border-slate-200 bg-white text-slate-800 hover:border-teal-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-teal-400 dark:hover:bg-slate-900'
-                        }`}
-                      >
-                        <span className="text-xs font-semibold tabular-nums leading-none">
-                          {cell.dayNumber}
-                        </span>
-                        {!isDisabled ? (
-                          <span
-                            className={`mt-0.5 rounded px-1 font-mono text-[9px] font-semibold tabular-nums leading-none ${
-                              isSelected
-                                ? 'bg-teal-900/30 text-white dark:bg-slate-950/30 dark:text-slate-950'
-                                : 'bg-teal-50 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300'
-                            }`}
-                          >
-                            {count}
-                          </span>
-                        ) : (
-                          <span className="mt-0.5 h-[10px]" aria-hidden="true" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div
-              aria-busy={loadingSlots}
-              className="lg:col-span-5 rounded-lg border border-slate-200 bg-slate-50/60 p-3.5 dark:border-slate-800 dark:bg-slate-950/40"
-            >
-              <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
-                <div>
-                  <span className="block text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">
-                    Select New Time
-                  </span>
-                  <span className="mt-0.5 block font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
-                    {formatDateLabel(selectedDate)}
-                  </span>
-                </div>
-                {loadingSlots ? (
-                  <span
-                    role="status"
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 dark:text-teal-300"
-                  >
-                    <Loader2
-                      className="h-3.5 w-3.5 animate-spin"
-                      aria-hidden="true"
-                    />
-                    <span>Loading...</span>
-                  </span>
-                ) : null}
-              </div>
-
-              {loadingSlots ? (
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  {Array.from({ length: 6 }).map((_, idx) => (
-                    <div
-                      key={idx}
-                      className="h-9 animate-pulse rounded-lg bg-slate-200/70 dark:bg-slate-800"
-                    />
-                  ))}
-                </div>
-              ) : slots.length === 0 ? (
-                <p className="mt-2.5 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                  No open clinic slots on this date. Please choose another day.
-                </p>
-              ) : (
-                <div className="mt-2.5 max-h-[268px] space-y-3 overflow-y-auto pr-1">
-                  {[
-                    { heading: 'Morning', items: morningSlots },
-                    { heading: 'Afternoon', items: afternoonSlots },
-                  ].map((group) =>
-                    group.items.length > 0 ? (
-                      <div key={group.heading}>
-                        <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                          {group.heading}
-                        </p>
-                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                          {group.items.map((slot) => {
-                            const isSelected = selectedTime24 === slot.time24;
-                            return (
-                              <button
-                                key={slot.time24}
-                                type="button"
-                                disabled={!slot.available}
-                                onClick={() => setSelectedTime24(slot.time24)}
-                                aria-pressed={isSelected}
-                                className={`rounded-lg border px-2 py-2 text-xs font-mono tabular-nums font-medium transition-colors min-h-[38px] whitespace-nowrap ${
-                                  !slot.available
-                                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-600'
-                                    : isSelected
-                                      ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
-                                      : 'border-slate-200 bg-white text-slate-800 hover:border-teal-600 hover:text-teal-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-teal-400 dark:hover:text-teal-300'
-                                }`}
-                              >
-                                {slot.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <CalendarSlotPicker
+            activeMonth={activeMonth}
+            monthIndex={monthIndex}
+            totalMonths={availableMonths.length}
+            monthCells={monthCells}
+            selectedDate={selectedDate}
+            selectedTime24={selectedTime24}
+            slots={slots}
+            loadingSlots={loadingSlots}
+            getDateSlotCount={getDateSlotCount}
+            onMonthNavigate={handleMonthNavigate}
+            onSelectDate={(dateIso) => {
+              setSelectedDate(dateIso);
+              setSelectedTime24('');
+            }}
+            onSelectTime={(time24) => {
+              setSelectedTime24(time24);
+              if (errorMessage) setErrorMessage('');
+            }}
+            slotsHeading="Select New Time"
+            variant="modal"
+          />
 
           {/* Reason for Visit */}
-          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
-            <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
               <label
                 htmlFor="reschedule-reason"
                 className="block text-sm font-semibold text-slate-800 dark:text-slate-200"
               >
                 Reason for Visit
               </label>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
+              <span className="text-xs text-slate-600 dark:text-slate-300">
                 Tap common reasons below or edit text
               </span>
             </div>
@@ -608,7 +440,7 @@ export function RescheduleModal({
                 if (errorMessage) setErrorMessage('');
               }}
               placeholder="Describe your symptoms or reason for visit..."
-              className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400"
             />
             {appointment.appointmentTypeId ? (
               <div className="mt-2">
@@ -629,7 +461,7 @@ export function RescheduleModal({
                         }}
                         className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
                           selected
-                            ? 'border-teal-700 bg-teal-700 text-white dark:border-teal-400 dark:bg-teal-500 dark:text-slate-950'
+                            ? 'border-brand-primary bg-brand-primary text-brand-fg'
                             : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200'
                         }`}
                       >
@@ -651,7 +483,7 @@ export function RescheduleModal({
             </p>
           ) : null}
 
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800">
             <button
               type="button"
               disabled={submitting}
@@ -665,7 +497,7 @@ export function RescheduleModal({
               type="submit"
               disabled={submitting || loadingSlots || !selectedTime24}
               aria-busy={submitting}
-              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-teal-700 px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 whitespace-nowrap shrink-0 min-h-[40px]"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg bg-brand-primary px-3.5 py-2 text-xs sm:px-5 sm:text-sm font-semibold text-brand-fg hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0 min-h-[40px]"
             >
               {submitting ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Calendar,
@@ -10,10 +10,11 @@ import {
 } from 'lucide-react';
 import type { Appointment, ValidationErrors } from '../types/clinic';
 import {
-  formatDateLabel,
+  formatDateWithWeekday,
   formatTime12h,
   validateCancellationReason,
 } from '../utils/appointments';
+import { useDialogAccessibility } from '../hooks/useDialogAccessibility';
 import { ThemedSelect } from './ThemedSelect';
 
 interface CancelModalProps {
@@ -49,6 +50,9 @@ export function CancelModal({
   const [fieldErrors, setFieldErrors] = useState<ValidationErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useDialogAccessibility(Boolean(appointment), dialogRef, onClose, submitting);
 
   useEffect(() => {
     if (!appointment) return;
@@ -58,17 +62,6 @@ export function CancelModal({
     setFieldErrors({});
     setErrorMessage('');
   }, [appointment]);
-
-  useEffect(() => {
-    if (!appointment) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [appointment, onClose, submitting]);
 
   if (!appointment) return null;
 
@@ -81,6 +74,18 @@ export function CancelModal({
     );
     if (Object.keys(validation).length > 0) {
       setFieldErrors(validation);
+      const firstErrorId = validation.reason
+        ? 'cancel-reason-select'
+        : validation.customNote
+          ? 'cancel-note-input'
+          : validation.confirmed
+            ? 'cancel-confirm-checkbox'
+            : null;
+      if (firstErrorId) {
+        window.requestAnimationFrame(() =>
+          document.getElementById(firstErrorId)?.focus()
+        );
+      }
       return;
     }
 
@@ -110,16 +115,18 @@ export function CancelModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-4 backdrop-blur-xs"
       onClick={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose();
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="cancel-dialog-title"
-        className="w-full max-w-5xl min-h-[580px] sm:min-h-[640px] max-h-[92vh] flex flex-col justify-between overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        className="w-full max-w-5xl min-w-0 max-h-[90dvh] flex flex-col justify-between overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white text-slate-900 shadow-2xl focus:outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5 dark:border-slate-800">
           <div className="flex items-start gap-3">
@@ -151,24 +158,35 @@ export function CancelModal({
 
         <form onSubmit={handleSubmit} className="flex flex-1 flex-col justify-between p-4 sm:p-6" noValidate>
           <div className="space-y-4 sm:space-y-5">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
             <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
               {appointment.appointmentTypeName}
             </p>
             <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700 dark:text-slate-300">
-              <span className="inline-flex items-center gap-1.5 font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                <Calendar className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
-                <span>{formatDateLabel(appointment.date)}</span>
-                <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0 ml-1" aria-hidden="true" />
-                <span>{formatTime12h(appointment.time24)}</span>
+              <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-2.5 gap-y-1 font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-brand-text dark:text-brand-text-dark shrink-0" aria-hidden="true" />
+                  <span className="break-words">{formatDateWithWeekday(appointment.date)}</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500 shrink-0" aria-hidden="true" />
+                  <span>{formatTime12h(appointment.time24)}</span>
+                </span>
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <User className="h-3.5 w-3.5 text-brand-text dark:text-brand-text-dark shrink-0" aria-hidden="true" />
                 <span>{appointment.providerName}, {appointment.providerCredentials}</span>
               </span>
-              <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                <MapPin className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400 shrink-0" aria-hidden="true" />
-                <span>{appointment.locationName}</span>
+              <span className="inline-flex min-w-0 items-start gap-1.5 text-slate-600 dark:text-slate-400">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 text-brand-text dark:text-brand-text-dark shrink-0" aria-hidden="true" />
+                <span className="min-w-0 break-words">
+                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                    {appointment.locationName}
+                  </span>
+                  {appointment.locationAddress
+                    ? ` — ${appointment.locationAddress}`
+                    : ''}
+                </span>
               </span>
             </div>
           </div>
@@ -241,7 +259,7 @@ export function CancelModal({
                   ? 'Please share why you are cancelling this visit...'
                   : 'Share any details or let us know if you need help rebooking...'
               }
-              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400"
             />
             {fieldErrors.customNote ? (
               <p
@@ -265,7 +283,7 @@ export function CancelModal({
                 fieldErrors.confirmed
                   ? 'border-rose-400 bg-rose-50/70 text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100'
                   : confirmed
-                    ? 'border-teal-700 bg-teal-50/60 text-slate-900 dark:border-teal-400 dark:bg-teal-950/40 dark:text-slate-100'
+                    ? 'border-brand-primary bg-brand-soft-bg text-slate-900 dark:border-brand-primary dark:bg-brand-soft-bg-dark dark:text-slate-100'
                     : 'border-slate-200 bg-slate-50/70 text-slate-800 hover:bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200'
               }`}
             >
@@ -313,7 +331,7 @@ export function CancelModal({
           ) : null}
           </div>
 
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800 mt-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 sm:gap-3 dark:border-slate-800 mt-6">
             <button
               type="button"
               disabled={submitting}

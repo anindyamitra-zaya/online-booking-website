@@ -15,12 +15,15 @@ import {
 import type { Appointment, PatientProfile } from './src/types/clinic';
 import { DEFAULT_INSURANCE_COMPANIES } from './src/data/insuranceCompanies';
 import {
+  calculateAgeFromDob,
+  combineFullName,
   filterInsuranceCompanies,
   filterUpcomingAppointments,
   generateAvailableSlots,
   normalizePhoneDigits,
   parseMmDdYyyyToIso,
   resolveProviderForBooking,
+  splitFullName,
   validatePhoneNumber,
   validateVerificationCode,
 } from './src/utils/appointments';
@@ -44,8 +47,58 @@ interface PatientSession {
   ip: string;
 }
 
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+const DATA_DIR = path.resolve(process.cwd(), '.data');
+const STORE_PATH = path.join(DATA_DIR, 'clinic-store.json');
+const SESSIONS_PATH = path.join(DATA_DIR, 'clinic-sessions.json');
+
 const phoneChallenges = new Map<string, PhoneVerificationChallenge>();
-const sessions = new Map<string, PatientSession>();
+
+function loadSessions(): Map<string, PatientSession> {
+  const map = new Map<string, PatientSession>();
+  try {
+    if (fs.existsSync(SESSIONS_PATH)) {
+      const raw = fs.readFileSync(SESSIONS_PATH, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, PatientSession>;
+      const now = Date.now();
+      for (const [token, sess] of Object.entries(parsed || {})) {
+        if (sess && typeof sess.lastActive === 'number' && now - sess.lastActive <= SESSION_TIMEOUT_MS) {
+          map.set(token, sess);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load persisted sessions:', err);
+  }
+  return map;
+}
+
+const sessions = loadSessions();
+let lastSessionFlushAt = 0;
+
+function saveSessions(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastSessionFlushAt < 15000) {
+    return;
+  }
+  lastSessionFlushAt = now;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const serialized: Record<string, PatientSession> = {};
+    for (const [token, sess] of sessions.entries()) {
+      if (now - sess.lastActive <= SESSION_TIMEOUT_MS) {
+        serialized[token] = sess;
+      } else {
+        sessions.delete(token);
+      }
+    }
+    fs.writeFileSync(SESSIONS_PATH, JSON.stringify(serialized, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to persist clinic sessions:', err);
+  }
+}
 
 function validateSession(
   req: express.Request,
@@ -68,8 +121,9 @@ function validateSession(
   }
 
   const session = sessions.get(token);
-  if (!session || Date.now() - session.lastActive > 15 * 60 * 1000) {
+  if (!session || Date.now() - session.lastActive > SESSION_TIMEOUT_MS) {
     sessions.delete(token);
+    saveSessions(true);
     res.status(401).json({
       error:
         'Your session has expired due to inactivity. Please verify your details again.',
@@ -78,6 +132,7 @@ function validateSession(
   }
 
   session.lastActive = Date.now();
+  saveSessions(false);
   return session;
 }
 
@@ -195,9 +250,6 @@ interface StoreState {
   appointments: Appointment[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), '.data');
-const STORE_PATH = path.join(DATA_DIR, 'clinic-store.json');
-
 function resolveClinicBundle(clinicParam?: string): ClinicBundle {
   const key = (clinicParam || process.env.CLINIC_ID || 'texas-lung')
     .trim()
@@ -217,20 +269,40 @@ function loadStore(): StoreState {
       ) {
         const hydratedPatients = parsed.patients.map((p) => {
           const seedMatch = DEFAULT_PATIENTS.find((sp) => sp.id === p.id);
-          if (!seedMatch) return p;
+          const merged = seedMatch
+            ? {
+                ...seedMatch,
+                ...p,
+                sex: p.sex || seedMatch.sex,
+                street: p.street || seedMatch.street,
+                city: p.city || seedMatch.city,
+                state: p.state || seedMatch.state,
+                pin: p.pin || seedMatch.pin,
+              }
+            : p;
+          const split = splitFullName(merged.fullName);
           return {
-            ...seedMatch,
-            ...p,
-            sex: p.sex || seedMatch.sex,
-            street: p.street || seedMatch.street,
-            city: p.city || seedMatch.city,
-            state: p.state || seedMatch.state,
-            pin: p.pin || seedMatch.pin,
+            ...merged,
+            firstName: merged.firstName || split.firstName,
+            lastName: merged.lastName || split.lastName,
+            age:
+              merged.age ??
+              calculateAgeFromDob(merged.dateOfBirth, REFERENCE_TODAY_ISO) ??
+              undefined,
           };
         });
+        const mergedAppointments = [...parsed.appointments];
+        for (const seedAppt of DEFAULT_APPOINTMENTS) {
+          if (
+            seedAppt.clinicId &&
+            !mergedAppointments.some((a) => a.clinicId === seedAppt.clinicId)
+          ) {
+            mergedAppointments.push(seedAppt);
+          }
+        }
         return {
           patients: hydratedPatients,
-          appointments: parsed.appointments,
+          appointments: mergedAppointments,
         };
       }
     }
@@ -359,7 +431,13 @@ async function startServer() {
   });
 
   app.post('/api/patients/lookup', async (req, res) => {
-    const fullName = String(req.body?.fullName || '').trim();
+    const firstNameInput = String(req.body?.firstName || '').trim();
+    const lastNameInput = String(req.body?.lastName || '').trim();
+    const rawFullName = String(req.body?.fullName || '').trim();
+    const fullName =
+      firstNameInput || lastNameInput
+        ? combineFullName(firstNameInput, lastNameInput)
+        : rawFullName;
     const rawDob = String(req.body?.dateOfBirth || '').trim();
     const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
     const phone = String(req.body?.phone || '').trim();
@@ -378,7 +456,7 @@ async function startServer() {
 
     if (!fullName || !dateOfBirth) {
       res.status(400).json({
-        error: 'Both full name and date of birth are required.',
+        error: 'First name, last name, and date of birth are required.',
       });
       return;
     }
@@ -400,9 +478,18 @@ async function startServer() {
     if (existing) {
       if (phone) existing.phone = phone;
       if (email) existing.email = email;
+      const split = splitFullName(existing.fullName);
+      if (!existing.firstName) existing.firstName = split.firstName;
+      if (!existing.lastName) existing.lastName = split.lastName;
+      if (existing.age == null) {
+        existing.age =
+          calculateAgeFromDob(existing.dateOfBirth, REFERENCE_TODAY_ISO) ??
+          undefined;
+      }
       saveStore(store);
       const sess = sessions.get(sessionToken);
       if (sess) sess.patientId = existing.id;
+      saveSessions(true);
       res.json({
         found: true,
         status: 'established',
@@ -412,6 +499,7 @@ async function startServer() {
       return;
     }
 
+    saveSessions(true);
     res.json({
       found: false,
       status: 'new',
@@ -500,6 +588,7 @@ async function startServer() {
 
     session.verifiedPhone = rawPhone;
     session.verifiedPhoneToken = verificationToken;
+    saveSessions(true);
 
     res.json({
       verified: true,
@@ -512,9 +601,20 @@ async function startServer() {
     const session = validateSession(req, res);
     if (!session) return;
 
-    const fullName = String(req.body?.fullName || '').trim();
+    const firstNameInput = String(req.body?.firstName || '').trim();
+    const lastNameInput = String(req.body?.lastName || '').trim();
+    const rawFullName = String(req.body?.fullName || '').trim();
+    const fullName =
+      firstNameInput || lastNameInput
+        ? combineFullName(firstNameInput, lastNameInput)
+        : rawFullName;
+    const split = splitFullName(fullName);
+    const firstName = firstNameInput || split.firstName;
+    const lastName = lastNameInput || split.lastName;
     const rawDob = String(req.body?.dateOfBirth || '').trim();
     const dateOfBirth = parseMmDdYyyyToIso(rawDob) || rawDob;
+    const computedAge =
+      calculateAgeFromDob(dateOfBirth, REFERENCE_TODAY_ISO) ?? undefined;
     const phone = String(req.body?.phone || '').trim();
     const phoneVerificationToken = String(
       req.body?.phoneVerificationToken || ''
@@ -536,7 +636,7 @@ async function startServer() {
     if (!fullName || !dateOfBirth || !phone) {
       res.status(400).json({
         error:
-          'Full name, date of birth, and mobile phone number are required to register.',
+          'First name, last name, date of birth, and mobile phone number are required to register.',
       });
       return;
     }
@@ -563,6 +663,9 @@ async function startServer() {
         p.dateOfBirth === dateOfBirth
     );
     if (existing) {
+      existing.firstName = firstName;
+      existing.lastName = lastName;
+      if (computedAge !== undefined) existing.age = computedAge;
       if (sex) existing.sex = sex;
       if (preferredLanguage) existing.preferredLanguage = preferredLanguage;
       if (street) existing.street = street;
@@ -578,8 +681,11 @@ async function startServer() {
 
     const newPatient: PatientProfile = {
       id: `pat-${Date.now()}`,
+      firstName,
+      lastName,
       fullName,
       dateOfBirth,
+      age: computedAge,
       phone,
       email,
       sex: sex || undefined,
@@ -596,6 +702,7 @@ async function startServer() {
     phoneChallenges.delete(phoneDigits);
     saveStore(store);
     session.patientId = newPatient.id;
+    saveSessions(true);
     res.status(201).json(newPatient);
   });
 

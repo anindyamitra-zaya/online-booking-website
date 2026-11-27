@@ -1,6 +1,6 @@
 import type {
   Appointment,
-  AppointmentFilterTab,
+  AppointmentType,
   BookingDraft,
   ClinicLocation,
   ClinicProfile,
@@ -95,6 +95,35 @@ export function formatShortDate(isoDate: string): {
     }).format(dt),
     monthDay: `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
   };
+}
+
+export function formatDateWithWeekday(isoDate: string): string {
+  const raw = (isoDate || '').trim();
+  if (!raw) return '';
+  const normalized = parseMmDdYyyyToIso(raw) || raw;
+  const parts = normalized.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) {
+    return formatDateLabel(raw);
+  }
+  const [year, month, day] = parts;
+  const dt = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(dt);
+}
+
+export function formatLocationFullAddress(
+  location?: { address?: string; cityStateZip?: string } | null
+): string {
+  if (!location) return '';
+  return [location.address, location.cityStateZip]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(', ');
 }
 
 export function toAppointmentTimestamp(dateStr: string, time24: string): number {
@@ -486,15 +515,87 @@ export function validateCancellationReason(
   return errors;
 }
 
+export function splitFullName(fullName: string): {
+  firstName: string;
+  lastName: string;
+} {
+  const cleaned = (fullName || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) {
+    return { firstName: '', lastName: '' };
+  }
+  const idx = cleaned.indexOf(' ');
+  if (idx === -1) {
+    return { firstName: cleaned, lastName: '' };
+  }
+  return {
+    firstName: cleaned.slice(0, idx).trim(),
+    lastName: cleaned.slice(idx + 1).trim(),
+  };
+}
+
+export function combineFullName(firstName: string, lastName: string): string {
+  return [firstName, lastName]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function calculateAgeFromDob(
+  dateOfBirth: string,
+  referenceIsoDate?: string
+): number | null {
+  const dobIso = parseMmDdYyyyToIso(dateOfBirth);
+  if (!dobIso) return null;
+
+  const [dobYear, dobMonth, dobDay] = dobIso.split('-').map(Number);
+
+  let refYear: number;
+  let refMonth: number;
+  let refDay: number;
+  if (referenceIsoDate && /^\d{4}-\d{2}-\d{2}$/.test(referenceIsoDate)) {
+    [refYear, refMonth, refDay] = referenceIsoDate.split('-').map(Number);
+  } else {
+    const now = new Date();
+    refYear = now.getUTCFullYear();
+    refMonth = now.getUTCMonth() + 1;
+    refDay = now.getUTCDate();
+  }
+
+  let age = refYear - dobYear;
+  if (refMonth < dobMonth || (refMonth === dobMonth && refDay < dobDay)) {
+    age -= 1;
+  }
+
+  if (age < 0 || age > 125) {
+    return null;
+  }
+  return age;
+}
+
 export function validatePatientLookup(
-  fullName: string,
-  dateOfBirth: string
+  firstNameOrFullName: string,
+  lastNameOrDob: string,
+  maybeDateOfBirth?: string
 ): ValidationErrors {
   const errors: ValidationErrors = {};
-  if (fullName.trim().length < 2) {
+
+  if (maybeDateOfBirth !== undefined) {
+    if (firstNameOrFullName.trim().length < 1) {
+      errors.firstName = 'Please enter your first name.';
+    }
+    if (lastNameOrDob.trim().length < 1) {
+      errors.lastName = 'Please enter your last name.';
+    }
+    if (!parseMmDdYyyyToIso(maybeDateOfBirth)) {
+      errors.dateOfBirth = 'Please enter a valid date of birth (MM-DD-YYYY).';
+    }
+    return errors;
+  }
+
+  if (firstNameOrFullName.trim().length < 2) {
     errors.fullName = 'Please enter your full name.';
   }
-  if (!parseMmDdYyyyToIso(dateOfBirth)) {
+  if (!parseMmDdYyyyToIso(lastNameOrDob)) {
     errors.dateOfBirth = 'Please enter a valid date of birth (MM-DD-YYYY).';
   }
   return errors;
@@ -594,11 +695,12 @@ export function toggleVisitReason(current: string, reason: string): string {
 }
 
 export function validatePatientRegistration(payload: {
+  firstName?: string;
+  lastName?: string;
   fullName: string;
   dateOfBirth: string;
   phone: string;
   email?: string;
-  age?: string;
   sex?: string;
   preferredLanguage?: string;
   street?: string;
@@ -609,14 +711,22 @@ export function validatePatientRegistration(payload: {
   insuranceProvider?: string;
   insuranceMemberId?: string;
 }): ValidationErrors {
-  const errors = validatePatientLookup(payload.fullName, payload.dateOfBirth);
+  const errors: ValidationErrors =
+    payload.firstName !== undefined || payload.lastName !== undefined
+      ? validatePatientLookup(
+          payload.firstName || '',
+          payload.lastName || '',
+          payload.dateOfBirth
+        )
+      : validatePatientLookup(payload.fullName, payload.dateOfBirth);
+
+  if (!errors.dateOfBirth && calculateAgeFromDob(payload.dateOfBirth) === null) {
+    errors.dateOfBirth = 'Please enter a valid date of birth (MM-DD-YYYY).';
+  }
+
   const phoneDigits = (payload.phone || '').replace(/\D/g, '');
   if (phoneDigits.length < 10) {
     errors.phone = 'Please enter a valid 10-digit mobile phone number.';
-  }
-  const ageNum = Number(payload.age);
-  if (!payload.age || Number.isNaN(ageNum) || ageNum <= 0 || ageNum > 120) {
-    errors.age = 'Please enter a valid age.';
   }
   if (!payload.sex?.trim()) {
     errors.sex = 'Please select sex.';
@@ -641,6 +751,59 @@ export function validatePatientRegistration(payload: {
     }
   }
   return errors;
+}
+
+export function getApplicableAppointmentTypes(
+  appointmentTypes: AppointmentType[],
+  patientKind?: 'new' | 'established' | null,
+  locationId?: string
+): AppointmentType[] {
+  let filtered = appointmentTypes;
+  if (patientKind) {
+    const kindMatched = filtered.filter(
+      (type) =>
+        !type.applicablePatientKinds ||
+        type.applicablePatientKinds.length === 0 ||
+        type.applicablePatientKinds.includes(patientKind)
+    );
+    if (kindMatched.length > 0) {
+      filtered = kindMatched;
+    }
+  }
+  if (locationId) {
+    const locMatched = filtered.filter(
+      (type) =>
+        !type.locationIds ||
+        type.locationIds.length === 0 ||
+        type.locationIds.includes(locationId)
+    );
+    if (locMatched.length > 0) {
+      filtered = locMatched;
+    }
+  }
+  return filtered;
+}
+
+export function getEligibleProviders(
+  providers: Provider[],
+  locationId?: string
+): Provider[] {
+  if (!locationId) return providers;
+  const matched = providers.filter((p) => p.locationIds.includes(locationId));
+  return matched.length > 0 ? matched : providers;
+}
+
+export function getVisibleBookingStepNumbers(params: {
+  locationsCount: number;
+  appointmentTypesCount: number;
+  providersCount: number;
+}): number[] {
+  const steps: number[] = [];
+  if (params.locationsCount > 1) steps.push(1);
+  if (params.appointmentTypesCount > 1) steps.push(2);
+  if (params.providersCount > 1) steps.push(3);
+  steps.push(4, 5, 6);
+  return steps;
 }
 
 export function resolveProviderForBooking(

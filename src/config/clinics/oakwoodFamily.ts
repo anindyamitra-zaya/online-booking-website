@@ -9,7 +9,8 @@ export const oakwoodFamilyConfig: ClinicBundleConfig = {
     phone: '(512) 555-0315',
     supportEmail: 'care@oakwoodfamily.example',
     cancellationPolicyHours: 24,
-    bannerImage: '/src/assets/images/clinic_atrium_interior_1795001144756.jpg',
+    bannerImage: '/src/assets/images/clinic_atrium_interior.webp',
+    themeColor: '#047857',
     brandAccent: 'emerald',
     reschedulePolicy: {
       lockProvider: true,
@@ -49,11 +50,15 @@ export const oakwoodFamilyConfig: ClinicBundleConfig = {
       {
         label: 'Established: Elena Vance',
         fullName: 'Elena Vance',
+        firstName: 'Elena',
+        lastName: 'Vance',
         dateOfBirth: '1984-05-14',
       },
       {
         label: 'New Patient: Jordan Taylor',
         fullName: 'Jordan Taylor',
+        firstName: 'Jordan',
+        lastName: 'Taylor',
         dateOfBirth: '1990-03-12',
       },
     ],

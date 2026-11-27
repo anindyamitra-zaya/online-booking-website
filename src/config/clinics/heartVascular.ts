@@ -9,7 +9,8 @@ export const heartVascularConfig: ClinicBundleConfig = {
     phone: '(512) 555-0240',
     supportEmail: 'scheduling@centralheart.example',
     cancellationPolicyHours: 24,
-    bannerImage: '/src/assets/images/clinic_atrium_interior_1795001144756.jpg',
+    bannerImage: '/src/assets/images/clinic_atrium_interior.webp',
+    themeColor: '#1d4ed8',
     brandAccent: 'blue',
     reschedulePolicy: {
       lockProvider: true,
@@ -50,11 +51,15 @@ export const heartVascularConfig: ClinicBundleConfig = {
       {
         label: 'Established: Elena Vance',
         fullName: 'Elena Vance',
+        firstName: 'Elena',
+        lastName: 'Vance',
         dateOfBirth: '1984-05-14',
       },
       {
         label: 'New Patient: Jordan Taylor',
         fullName: 'Jordan Taylor',
+        firstName: 'Jordan',
+        lastName: 'Taylor',
         dateOfBirth: '1990-03-12',
       },
     ],

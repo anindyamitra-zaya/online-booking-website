@@ -1,28 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  calculateAgeFromDob,
   canModifyAppointment,
+  combineFullName,
   computeDropdownPlacement,
   filterInsuranceCompanies,
   filterUpcomingAppointments,
   formatCalendarMonthTitle,
   formatDateInputMmDdYyyy,
   formatDateLabel,
+  formatDateWithWeekday,
+  formatLocationFullAddress,
   formatResendLabel,
   formatShortDate,
   formatTime12h,
   generateAvailableSlots,
   generateIcsContent,
+  getApplicableAppointmentTypes,
   getAvailableMonths,
   getBookableDates,
   getCalendarMonthGrid,
   getCommonVisitReasons,
+  getEligibleProviders,
   getProviderInitials,
   getReschedulePolicy,
+  getVisibleBookingStepNumbers,
   isReasonSelected,
   normalizePhoneDigits,
   parseMmDdYyyyToIso,
   resolveRescheduleTargets,
+  splitFullName,
   toggleVisitReason,
   validateBookingStep,
   validateCancellationReason,
@@ -32,6 +40,7 @@ import {
   validateRecaptchaToken,
   validateVerificationCode,
 } from './appointments';
+import { mmcConfig } from '../config/clinics/mmc';
 import { US_LANGUAGES } from '../data/usLanguages';
 import { US_STATES } from '../data/usStates';
 import type { Appointment, BookingDraft, ClinicProfile } from '../types/clinic';
@@ -135,6 +144,33 @@ test('formatShortDate returns weekday and MM-DD format', () => {
   const short = formatShortDate('2026-11-24'); // Tuesday
   assert.equal(short.weekday, 'Tue');
   assert.equal(short.monthDay, '11-24');
+});
+
+test('formatDateWithWeekday formats ISO and MM-DD-YYYY dates with full day of week and month name', () => {
+  assert.equal(
+    formatDateWithWeekday('2026-11-24'),
+    'Tuesday, November 24, 2026'
+  );
+  assert.equal(
+    formatDateWithWeekday('11-18-2026'),
+    'Wednesday, November 18, 2026'
+  );
+  assert.equal(formatDateWithWeekday(''), '');
+});
+
+test('formatLocationFullAddress joins street address and city/state/zip cleanly', () => {
+  assert.equal(
+    formatLocationFullAddress({
+      address: '2400 Medical Pkwy, Suite 300',
+      cityStateZip: 'Austin, TX 78705',
+    }),
+    '2400 Medical Pkwy, Suite 300, Austin, TX 78705'
+  );
+  assert.equal(
+    formatLocationFullAddress({ address: '100 Main St', cityStateZip: '' }),
+    '100 Main St'
+  );
+  assert.equal(formatLocationFullAddress(null), '');
 });
 
 test('filterUpcomingAppointments excludes past and cancelled visits', () => {
@@ -319,7 +355,32 @@ test('parseMmDdYyyyToIso validates calendar dates in MM-DD-YYYY and ISO formats'
   assert.equal(parseMmDdYyyyToIso('11/20/1980'), null);
 });
 
-test('validatePatientLookup rejects empty name and bad DOB format and accepts mm-dd-yyyy', () => {
+test('splitFullName, combineFullName, and calculateAgeFromDob compute expected values', () => {
+  assert.deepEqual(splitFullName('Elena Vance'), {
+    firstName: 'Elena',
+    lastName: 'Vance',
+  });
+  assert.deepEqual(splitFullName('Mary Jane Watson'), {
+    firstName: 'Mary',
+    lastName: 'Jane Watson',
+  });
+  assert.equal(combineFullName('Elena', 'Vance'), 'Elena Vance');
+
+  assert.equal(calculateAgeFromDob('1984-05-14', '2026-11-18'), 42);
+  assert.equal(calculateAgeFromDob('05-14-1984', '2026-05-13'), 41);
+  assert.equal(calculateAgeFromDob('05-14-1984', '2026-05-14'), 42);
+  assert.equal(calculateAgeFromDob('invalid', '2026-11-18'), null);
+});
+
+test('validatePatientLookup rejects empty first/last name and bad DOB format and accepts mm-dd-yyyy', () => {
+  const splitErrs = validatePatientLookup('', '', '11/20/1980');
+  assert.ok(splitErrs.firstName);
+  assert.ok(splitErrs.lastName);
+  assert.ok(splitErrs.dateOfBirth);
+
+  const okSplit = validatePatientLookup('Elena', 'Vance', '05-14-1984');
+  assert.deepEqual(okSplit, {});
+
   const errs = validatePatientLookup('', '11/20/1980');
   assert.ok(errs.fullName);
   assert.ok(errs.dateOfBirth);
@@ -334,15 +395,17 @@ test('validatePatientLookup rejects empty name and bad DOB format and accepts mm
   assert.deepEqual(okIso, {});
 });
 
-test('validatePatientRegistration enforces phone, age, sex, preferredLanguage, address, and insurance (without email)', () => {
+test('validatePatientRegistration enforces phone, sex, preferredLanguage, address, and insurance without manual age field', () => {
   const errs = validatePatientRegistration({
+    firstName: 'Jordan',
+    lastName: 'Taylor',
     fullName: 'Jordan Taylor',
     dateOfBirth: '1990-03-12',
     phone: '512',
     paymentType: 'insurance',
   });
   assert.ok(errs.phone);
-  assert.ok(errs.age);
+  assert.equal(errs.age, undefined);
   assert.ok(errs.sex);
   assert.ok(errs.preferredLanguage);
   assert.equal(errs.email, undefined);
@@ -351,10 +414,11 @@ test('validatePatientRegistration enforces phone, age, sex, preferredLanguage, a
   assert.ok(errs.insuranceMemberId);
 
   const okInsurance = validatePatientRegistration({
+    firstName: 'Jordan',
+    lastName: 'Taylor',
     fullName: 'Jordan Taylor',
     dateOfBirth: '1990-03-12',
     phone: '(512) 555-0199',
-    age: '30',
     sex: 'Female',
     preferredLanguage: 'English',
     street: '123 Test St',
@@ -368,10 +432,11 @@ test('validatePatientRegistration enforces phone, age, sex, preferredLanguage, a
   assert.deepEqual(okInsurance, {});
 
   const okSelfPay = validatePatientRegistration({
+    firstName: 'Jordan',
+    lastName: 'Taylor',
     fullName: 'Jordan Taylor',
     dateOfBirth: '1990-03-12',
     phone: '(512) 555-0199',
-    age: '30',
     sex: 'Male',
     preferredLanguage: 'Spanish',
     street: '123 Test St',
@@ -381,6 +446,56 @@ test('validatePatientRegistration enforces phone, age, sex, preferredLanguage, a
     paymentType: 'self-pay',
   });
   assert.deepEqual(okSelfPay, {});
+});
+
+test('single-option booking steps are skipped automatically while multi-option steps remain', () => {
+  const newTypes = getApplicableAppointmentTypes(
+    mmcConfig.appointmentTypes,
+    'new',
+    mmcConfig.clinic.locations[0].id
+  );
+  assert.equal(newTypes.length, 1);
+  assert.equal(newTypes[0].id, 'type-mmc-new-consult');
+
+  const establishedTypes = getApplicableAppointmentTypes(
+    mmcConfig.appointmentTypes,
+    'established',
+    mmcConfig.clinic.locations[0].id
+  );
+  assert.equal(establishedTypes.length, 2);
+
+  const eligibleProvs = getEligibleProviders(
+    mmcConfig.providers,
+    mmcConfig.clinic.locations[0].id
+  );
+  assert.equal(eligibleProvs.length, 1);
+
+  assert.deepEqual(
+    getVisibleBookingStepNumbers({
+      locationsCount: mmcConfig.clinic.locations.length,
+      appointmentTypesCount: newTypes.length,
+      providersCount: eligibleProvs.length,
+    }),
+    [4, 5, 6]
+  );
+
+  assert.deepEqual(
+    getVisibleBookingStepNumbers({
+      locationsCount: mmcConfig.clinic.locations.length,
+      appointmentTypesCount: establishedTypes.length,
+      providersCount: eligibleProvs.length,
+    }),
+    [2, 4, 5, 6]
+  );
+
+  assert.deepEqual(
+    getVisibleBookingStepNumbers({
+      locationsCount: 2,
+      appointmentTypesCount: 5,
+      providersCount: 3,
+    }),
+    [1, 2, 3, 4, 5, 6]
+  );
 });
 
 test('filterInsuranceCompanies filters matching company names case-insensitively', () => {

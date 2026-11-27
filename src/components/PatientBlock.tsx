@@ -29,7 +29,7 @@ export function PatientBlock({
         <div className="flex min-w-0 items-center gap-3.5">
           <div
             aria-hidden="true"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-teal-200 bg-teal-50 font-display text-sm font-bold text-teal-800 dark:border-teal-800 dark:bg-teal-950/60 dark:text-teal-200"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-soft-border bg-brand-soft-bg font-display text-sm font-bold text-brand-text dark:border-brand-soft-border-dark dark:bg-brand-soft-bg-dark dark:text-brand-text-dark"
           >
             {getProviderInitials(patient.fullName)}
           </div>

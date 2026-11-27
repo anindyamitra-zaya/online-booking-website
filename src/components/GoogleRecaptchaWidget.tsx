@@ -95,10 +95,30 @@ export function GoogleRecaptchaWidget({
   const [verifyingPreview, setVerifyingPreview] = useState(false);
   const [widgetLoadError, setWidgetLoadError] = useState('');
 
+  const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() =>
+    typeof document !== 'undefined'
+      ? document.documentElement.classList.contains('dark')
+      : false
+  );
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<number | null>(null);
   const onTokenChangeRef = useRef(onTokenChange);
   onTokenChangeRef.current = onTokenChange;
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const syncTheme = () => {
+      setIsDarkTheme(document.documentElement.classList.contains('dark'));
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,19 +149,17 @@ export function GoogleRecaptchaWidget({
     if (!config || config.mode !== 'google' || !config.siteKey) return;
     let cancelled = false;
 
-    const isDark =
-      typeof document !== 'undefined' &&
-      document.documentElement.classList.contains('dark');
     const isNarrow =
-      typeof window !== 'undefined' && window.innerWidth < 380;
+      typeof window !== 'undefined' && window.innerWidth < 400;
 
     loadGoogleRecaptchaScript()
       .then(() => {
         if (cancelled || !containerRef.current || !window.grecaptcha) return;
         containerRef.current.innerHTML = '';
+        onTokenChangeRef.current('');
         widgetIdRef.current = window.grecaptcha.render(containerRef.current, {
           sitekey: config.siteKey as string,
-          theme: isDark ? 'dark' : 'light',
+          theme: isDarkTheme ? 'dark' : 'light',
           size: isNarrow ? 'compact' : 'normal',
           callback: (nextToken: string) => {
             onTokenChangeRef.current(nextToken);
@@ -167,7 +185,7 @@ export function GoogleRecaptchaWidget({
     return () => {
       cancelled = true;
     };
-  }, [config]);
+  }, [config, isDarkTheme]);
 
   useEffect(() => {
     if (resetSignal === 0) return;
@@ -207,11 +225,15 @@ export function GoogleRecaptchaWidget({
   const displayError = error || widgetLoadError;
 
   return (
-    <div data-testid="recaptcha-box" className="space-y-1.5">
+    <div
+      data-testid="recaptcha-box"
+      data-theme={isDarkTheme ? 'dark' : 'light'}
+      className="min-w-0 max-w-full space-y-1.5"
+    >
       {loadingConfig ? (
-        <div className="flex h-[74px] w-full max-w-[304px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex h-[74px] w-full max-w-[304px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
           <Loader2
-            className="h-5 w-5 animate-spin text-teal-700 dark:text-teal-400"
+            className="h-5 w-5 animate-spin text-brand-text dark:text-brand-text-dark"
             aria-hidden="true"
           />
           <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -224,12 +246,12 @@ export function GoogleRecaptchaWidget({
         </div>
       ) : (
         <div
-          className={`flex w-full max-w-[320px] items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 transition-colors ${
+          className={`flex w-full max-w-[320px] items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 text-slate-900 transition-colors dark:text-slate-100 ${
             displayError
-              ? 'border-rose-400 bg-rose-50/50 dark:border-rose-700 dark:bg-rose-950/30'
+              ? 'border-rose-300 bg-rose-50 dark:border-rose-700 dark:bg-rose-950/90'
               : token
-                ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/30'
-                : 'border-slate-300 bg-slate-50/90 dark:border-slate-700 dark:bg-slate-950/70'
+                ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-700 dark:bg-slate-900'
+                : 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900'
           }`}
         >
           <button
@@ -245,13 +267,13 @@ export function GoogleRecaptchaWidget({
             <span
               className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 transition-colors ${
                 token
-                  ? 'border-emerald-600 bg-emerald-600 text-white dark:border-emerald-500 dark:bg-emerald-500 dark:text-slate-950'
-                  : 'border-slate-400 bg-white dark:border-slate-500 dark:bg-slate-900'
+                  ? 'border-brand-primary bg-brand-primary text-brand-fg'
+                  : 'border-slate-400 bg-white dark:border-slate-500 dark:bg-slate-800'
               }`}
             >
               {verifyingPreview ? (
                 <Loader2
-                  className="h-3.5 w-3.5 animate-spin text-teal-700 dark:text-teal-300"
+                  className="h-3.5 w-3.5 animate-spin text-brand-text dark:text-brand-text-dark"
                   aria-hidden="true"
                 />
               ) : token ? (
@@ -265,13 +287,13 @@ export function GoogleRecaptchaWidget({
 
           <div className="flex shrink-0 flex-col items-center text-center leading-tight">
             <ShieldCheck
-              className="h-5 w-5 text-teal-700 dark:text-teal-400"
+              className="h-5 w-5 text-brand-text dark:text-brand-text-dark"
               aria-hidden="true"
             />
-            <span className="mt-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+            <span className="mt-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-200">
               reCAPTCHA
             </span>
-            <span className="text-[9px] text-slate-400 dark:text-slate-500">
+            <span className="text-[9px] text-slate-500 dark:text-slate-400">
               Protected
             </span>
           </div>

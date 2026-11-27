@@ -22,6 +22,8 @@ export interface ClinicLocation {
 export interface ClinicSamplePatient {
   label: string;
   fullName: string;
+  firstName?: string;
+  lastName?: string;
   dateOfBirth: string;
 }
 
@@ -39,7 +41,9 @@ export interface ClinicProfile {
   supportEmail: string;
   cancellationPolicyHours: number;
   bannerImage: string;
+  themeColor?: string;
   brandAccent?: 'teal' | 'blue' | 'emerald';
+  bookingNote?: string;
   reschedulePolicy?: {
     lockProvider?: boolean;
     lockLocation?: boolean;
@@ -76,12 +80,17 @@ export interface AppointmentType {
   description: string;
   telehealthAvailable: boolean;
   preparationInstructions: string[];
+  applicablePatientKinds?: Array<'new' | 'established'>;
+  locationIds?: string[];
 }
 
 export interface PatientProfile {
   id: string;
+  firstName?: string;
+  lastName?: string;
   fullName: string;
   dateOfBirth: string;
+  age?: number;
   phone: string;
   email?: string;
   sex?: string;

@@ -7,31 +7,31 @@ interface ClinicInfoViewProps {
 
 export function ClinicInfoView({ clinic }: ClinicInfoViewProps) {
   return (
-    <div className="space-y-4">
+    <div className="flex flex-1 flex-col min-w-0 space-y-4">
       {/* Compact Clinic Header */}
       <div className="flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-end sm:justify-between dark:border-slate-800">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700 dark:text-teal-300">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-text dark:text-brand-text-dark">
             {clinic.specialty}
           </p>
           <h1 className="mt-0.5 font-display text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
             {clinic.name}
           </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
           <span className="inline-flex items-center gap-1.5 font-mono tabular-nums">
-            <Phone className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400" aria-hidden="true" />
-            {clinic.phone}
+            <Phone className="h-3.5 w-3.5 shrink-0 text-brand-text dark:text-brand-text-dark" aria-hidden="true" />
+            <span>{clinic.phone}</span>
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Mail className="h-3.5 w-3.5 text-teal-700 dark:text-teal-400" aria-hidden="true" />
-            {clinic.supportEmail}
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <Mail className="h-3.5 w-3.5 shrink-0 text-brand-text dark:text-brand-text-dark" aria-hidden="true" />
+            <span className="break-all">{clinic.supportEmail}</span>
           </span>
         </div>
       </div>
 
       {/* Clinic Locations */}
-      <section aria-labelledby="clinic-locations-heading" className="space-y-3">
+      <section aria-labelledby="clinic-locations-heading" className="min-w-0 space-y-3">
         <h2
           id="clinic-locations-heading"
           className="font-display text-base font-semibold text-slate-900 dark:text-slate-50"
@@ -39,19 +39,19 @@ export function ClinicInfoView({ clinic }: ClinicInfoViewProps) {
           Clinic Locations &amp; Accessibility
         </h2>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid min-w-0 gap-4 md:grid-cols-2">
           {clinic.locations.map((loc) => (
             <article
               key={loc.id}
-              className="rounded-xl border border-slate-200 bg-white p-4 space-y-2.5 dark:border-slate-800 dark:bg-slate-900"
+              className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 space-y-2.5 dark:border-slate-800 dark:bg-slate-900"
             >
               <div>
-                <h3 className="font-display text-base font-semibold text-slate-900 dark:text-slate-50">
+                <h3 className="break-words font-display text-base font-semibold text-slate-900 dark:text-slate-50">
                   {loc.name}
                 </h3>
                 <p className="mt-0.5 flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-700 dark:text-teal-400" aria-hidden="true" />
-                  <span>
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-text dark:text-brand-text-dark" aria-hidden="true" />
+                  <span className="min-w-0 break-words">
                     {loc.address}, {loc.cityStateZip}
                   </span>
                 </p>

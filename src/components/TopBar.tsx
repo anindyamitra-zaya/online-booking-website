@@ -23,7 +23,6 @@ interface TopBarProps {
   upcomingCount: number;
   activeSection: PortalSection;
   onNavigate: (section: PortalSection) => void;
-  onStartBooking: () => void;
   onLogoutPatient: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
@@ -36,7 +35,6 @@ export function TopBar({
   upcomingCount,
   activeSection,
   onNavigate,
-  onStartBooking,
   onLogoutPatient,
   theme,
   onToggleTheme,
@@ -117,12 +115,12 @@ export function TopBar({
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/95">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 sm:gap-6 px-4 sm:px-6 lg:px-8">
         {/* Zone 1: Single-line Brand Wordmark */}
         <button
           type="button"
           onClick={() => handleNavClick('appointments')}
-          className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-slate-50 whitespace-nowrap shrink-0 text-left rounded-md px-1 py-1 hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
+          className="font-display text-lg font-bold tracking-tight text-slate-900 dark:text-slate-50 whitespace-nowrap min-w-0 max-w-[200px] sm:max-w-none truncate text-left rounded-md px-1 py-1 hover:text-brand-text dark:hover:text-brand-text-dark transition-colors"
         >
           {clinicShortName}
         </button>
@@ -151,7 +149,7 @@ export function TopBar({
                 }
                 className={`relative inline-flex items-center gap-2 py-2 text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
                   isActive
-                    ? 'text-teal-700 dark:text-teal-300'
+                    ? 'text-brand-text dark:text-brand-text-dark'
                     : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
                 }`}
               >
@@ -161,7 +159,7 @@ export function TopBar({
                     data-testid="nav-appointments-count"
                     className={`inline-flex min-w-[20px] items-center justify-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums leading-none ${
                       isActive
-                        ? 'bg-teal-700 text-white dark:bg-teal-500 dark:text-slate-950'
+                        ? 'bg-brand-primary text-brand-fg'
                         : 'bg-slate-200/80 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
                     }`}
                   >
@@ -171,7 +169,7 @@ export function TopBar({
                 {isActive ? (
                   <span
                     aria-hidden="true"
-                    className="absolute inset-x-0 -bottom-[9px] h-0.5 bg-teal-700 dark:bg-teal-400"
+                    className="absolute inset-x-0 -bottom-[9px] h-0.5 bg-brand-primary"
                   />
                 ) : null}
               </button>
@@ -218,7 +216,7 @@ export function TopBar({
                 >
                   <span
                     aria-hidden="true"
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-teal-700 font-display text-[11px] font-bold text-white dark:bg-teal-500 dark:text-slate-950"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-primary font-display text-[11px] font-bold text-brand-fg"
                   >
                     {getProviderInitials(patient.fullName)}
                   </span>
@@ -300,35 +298,19 @@ export function TopBar({
                         </div>
                       ) : null}
                     </dl>
-
-                    <div className="mt-3.5 border-t border-slate-100 pt-3 dark:border-slate-800">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={handleLogoutClick}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white transition-colors min-h-[38px]"
-                      >
-                        <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>Logout Patient</span>
-                      </button>
-                    </div>
                   </div>
                 ) : null}
               </div>
 
-              {activeSection !== 'book' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    setPatientMenuOpen(false);
-                    onStartBooking();
-                  }}
-                  className="hidden xl:inline-flex items-center justify-center rounded-lg bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white hover:bg-teal-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 transition-colors whitespace-nowrap shrink-0 min-h-[38px]"
-                >
-                  Book Appointment
-                </button>
-              ) : null}
+              <button
+                type="button"
+                data-testid="nav-switch-patient-button"
+                onClick={handleLogoutClick}
+                className="hidden sm:inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand-soft-border bg-white px-3.5 py-1.5 text-xs lg:text-sm font-semibold text-brand-text hover:bg-brand-soft-bg dark:border-brand-soft-border-dark dark:bg-slate-900 dark:text-brand-text-dark dark:hover:bg-brand-soft-bg-dark transition-colors whitespace-nowrap shrink-0 min-h-[38px]"
+              >
+                <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Switch Patient</span>
+              </button>
             </>
           ) : null}
 
@@ -356,7 +338,7 @@ export function TopBar({
           className="lg:hidden border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950"
         >
           {patient ? (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
               <div className="min-w-0">
                 <p className="truncate font-display text-sm font-bold text-slate-900 dark:text-slate-50">
                   {patient.fullName}
@@ -366,14 +348,6 @@ export function TopBar({
                   {patient.phone ? ` · ${patient.phone}` : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleLogoutClick}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 whitespace-nowrap shrink-0 min-h-[36px]"
-              >
-                <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Logout</span>
-              </button>
             </div>
           ) : null}
 
@@ -392,7 +366,7 @@ export function TopBar({
                   aria-current={isActive ? 'page' : undefined}
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-3 text-left text-base font-medium transition-colors min-h-[44px] ${
                     isActive
-                      ? 'bg-teal-50 text-teal-800 dark:bg-teal-950/70 dark:text-teal-200'
+                      ? 'bg-brand-soft-bg text-brand-text dark:bg-brand-soft-bg-dark dark:text-brand-text-dark'
                       : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900'
                   }`}
                 >
@@ -401,7 +375,7 @@ export function TopBar({
                     <span
                       className={`inline-flex min-w-[22px] items-center justify-center rounded-md px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums ${
                         isActive
-                          ? 'bg-teal-700 text-white dark:bg-teal-500 dark:text-slate-950'
+                          ? 'bg-brand-primary text-brand-fg'
                           : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
                       }`}
                     >
@@ -411,16 +385,14 @@ export function TopBar({
                 </button>
               );
             })}
-            {isPatientVerified && activeSection !== 'book' ? (
+            {isPatientVerified ? (
               <button
                 type="button"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onStartBooking();
-                }}
-                className="mt-2 flex w-full items-center justify-center rounded-lg bg-teal-700 px-4 py-3 text-base font-semibold text-white hover:bg-teal-800 dark:bg-teal-500 dark:text-slate-950 dark:hover:bg-teal-400 transition-colors min-h-[44px]"
+                onClick={handleLogoutClick}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-brand-soft-border bg-white px-4 py-3 text-base font-semibold text-brand-text hover:bg-brand-soft-bg dark:border-brand-soft-border-dark dark:bg-slate-900 dark:text-brand-text-dark dark:hover:bg-brand-soft-bg-dark transition-colors min-h-[44px]"
               >
-                Book Appointment
+                <LogOut className="h-4 w-4" aria-hidden="true" />
+                <span>Switch Patient</span>
               </button>
             ) : null}
           </nav>
